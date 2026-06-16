@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-NEXT AI 环境构建 (多源自动降级终极版)
-- 内置阿里、腾讯、华为、中科大四大顶级镜像源
-- 某个源卡死或封IP时，自动无缝切换下一个源
+NEXT AI 环境构建 (v3.0 最终修正版)
+- 修复 PyTorch GPU 安装：使用 --index-url 指向 PyTorch wheel 源（独立安装，不与 -i 混用）
+- 修复 Git LFS 源：移除 ghfast.top，替换为可信代理
+- 修复 get-pip.py 下载：添加国内镜像备选
+- PyTorch wheel 源三级降级：阿里云 → 南京大学 → 官方
+- 更新 Git 版本至 v2.47.0
 - 保留原生进度条与深度验证报告
 """
 import os, sys, subprocess, urllib.request, zipfile, tempfile, time, shutil, ssl, json, importlib
@@ -29,28 +32,55 @@ MIRRORS = [
 PYTHON_VERSION = "3.10.11"
 PYTHON_URL = f"https://mirrors.huaweicloud.com/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
 
+# ================= ★ PyTorch 版本与镜像配置 =================
 PYTORCH_VERSION = "2.5.1"
 TORCHVISION_VERSION = "0.20.1"
 TORCHAUDIO_VERSION = "2.5.1"
 CUDA_TAG = "cu121"
-PYTORCH_WHEEL_URL = f"https://mirror.sjtu.edu.cn/pytorch-wheels/{CUDA_TAG}"
-PYTORCH_WHEEL_URL_FALLBACK = f"https://download.pytorch.org/whl/{CUDA_TAG}"
 
-GIT_MIRROR_URLS = ["https://registry.npmmirror.com/-/binary/git-for-windows/v2.40.0.windows.1/Git-2.40.0-64-bit.exe"]
+# ★ PyTorch wheel 源三级降级（真正镜像，含完整依赖）
+PYTORCH_INDEX_URLS = [
+    "https://mirrors.aliyun.com/pytorch-wheels/cu121",      # 首选：阿里云真正镜像
+    "https://mirrors.nju.edu.cn/pytorch/whl/cu121",          # 备选：南京大学
+    f"https://download.pytorch.org/whl/{CUDA_TAG}",           # 兜底：官方
+]
+
+# get-pip.py 国内镜像备选
+GET_PIP_URLS = [
+    "http://mirrors.aliyun.com/pypi/get-pip.py",
+    "https://bootstrap.pypa.io/get-pip.py",
+]
+
+# Git 安装源（v2.47.0）
+GIT_VERSION = "2.47.0"
+GIT_MIRROR_URLS = [
+    f"https://registry.npmmirror.com/-/binary/git-for-windows/v{GIT_VERSION}.windows.1/Git-{GIT_VERSION}-64-bit.exe",
+    f"https://github.com/git-for-windows/git/releases/download/v{GIT_VERSION}.windows.1/Git-{GIT_VERSION}-64-bit.exe",
+]
+
+# ★ Git LFS 源修复：移除 ghfast.top
+GIT_LFS_VERSION = "3.5.2"
 GIT_LFS_MIRROR_URLS = [
-    "https://ghfast.top/https://github.com/git-lfs/git-lfs/releases/download/v3.5.2/git-lfs-windows-amd64-v3.5.2.zip"]
+    f"https://github.com/git-lfs/git-lfs/releases/download/v{GIT_LFS_VERSION}/git-lfs-windows-amd64-v{GIT_LFS_VERSION}.zip",
+    f"https://mirror.ghproxy.com/https://github.com/git-lfs/git-lfs/releases/download/v{GIT_LFS_VERSION}/git-lfs-windows-amd64-v{GIT_LFS_VERSION}.zip",
+]
+
 VC_REDIST_MIRROR_URLS = ["https://aka.ms/vs/17/release/vc_redist.x64.exe"]
 
+# ★ 分离 PyTorch 包和普通包
+PYTORCH_PACKAGES = {
+    "torch": PYTORCH_VERSION,
+    "torchvision": TORCHVISION_VERSION,
+    "torchaudio": TORCHAUDIO_VERSION,
+}
+
 REQUIRED_PACKAGES = {
-    "torch": (PYTORCH_VERSION, True),
-    "torchvision": (TORCHVISION_VERSION, True),
-    "torchaudio": (TORCHAUDIO_VERSION, True),
-    "transformers": ("4.48.0", False), "accelerate": ("1.2.1", False), "datasets": ("3.2.0", False),
-    "tokenizers": ("0.21.0", False), "peft": ("0.14.0", False), "bitsandbytes": ("0.45.0", False),
-    "safetensors": ("0.5.2", False), "PyQt5": ("5.15.11", False), "PyQtWebEngine": ("5.15.7", False),
-    "flask": ("3.1.0", False), "flask-cors": ("5.0.0", False), "numpy": ("1.26.4", False),
-    "pillow": ("10.4.0", False), "tqdm": (None, False), "requests": (None, False),
-    "modelscope": ("1.22.0", False), "duckduckgo-search": ("6.2.1", False), "scipy": (None, False)
+    "transformers": "4.48.0", "accelerate": "1.2.1", "datasets": "3.2.0",
+    "tokenizers": "0.21.0", "peft": "0.14.0", "bitsandbytes": "0.45.0",
+    "safetensors": "0.5.2", "PyQt5": "5.15.11", "PyQtWebEngine": "5.15.7",
+    "flask": "3.1.0", "flask-cors": "5.0.0", "numpy": "1.26.4",
+    "pillow": "10.4.0", "tqdm": None, "requests": None,
+    "modelscope": "1.22.0", "duckduckgo-search": "6.2.1", "scipy": None
 }
 
 
@@ -76,7 +106,6 @@ def run_cmd(cmd, capture=True, timeout=1200):
 def download_file(url, dest, log=None, retries=3):
     _log = log or print
 
-    # ---------- 格式化辅助 ----------
     def fmt_size(n):
         for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
             if abs(n) < 1024.0:
@@ -91,23 +120,20 @@ def download_file(url, dest, log=None, retries=3):
             return f"{int(s)//60}m{int(s)%60}s"
         return f"{int(s)//3600}h{int(s)%3600//60}m"
 
-    # ---------- 进度条渲染 ----------
     def draw_bar(downloaded, total, elapsed):
         if total > 0:
             pct = downloaded / total
             bar_w = 28
             filled = int(bar_w * pct)
             bar = "█" * filled + "░" * (bar_w - filled)
-            speed = downloaded / (elapsed + 0.001)  # 防除零
+            speed = downloaded / (elapsed + 0.001)
             eta = (total - downloaded) / speed if speed > 0 else 0
             return (f"\r ⬇️ [{bar}] {pct*100:5.1f}%  "
                     f"{fmt_size(downloaded)}/{fmt_size(total)}  "
                     f"{fmt_size(speed)}/s  ETA {fmt_time(eta)}")
         else:
-            # 服务器没返回 Content-Length 时的降级显示
             return f"\r ⬇️ 已下载 {fmt_size(downloaded)} (大小未知)"
 
-    # ---------- 下载主逻辑 ----------
     for attempt in range(1, retries + 1):
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -125,14 +151,13 @@ def download_file(url, dest, log=None, retries=3):
                      f"({fmt_size(total) if total else '未知大小'})")
 
                 while True:
-                    chunk = resp.read(1024 * 1024)  # 1 MB / 次，平衡内存与速度
+                    chunk = resp.read(1024 * 1024)
                     if not chunk:
                         break
                     out.write(chunk)
                     downloaded += len(chunk)
 
                     now = time.time()
-                    # 每 0.25 s 刷新一次，避免高频 IO 拖慢下载
                     if now - last_flush > 0.25 or downloaded == total:
                         sys.stdout.write(draw_bar(downloaded, total, now - start))
                         sys.stdout.flush()
@@ -145,7 +170,7 @@ def download_file(url, dest, log=None, retries=3):
             return True
 
         except Exception as e:
-            sys.stdout.write("\n")  # 强制换行，防止异常信息粘到进度条后面
+            sys.stdout.write("\n")
             _log(f" ⚠️ 第 {attempt}/{retries} 次尝试失败: {str(e)[:80]}")
             if attempt < retries:
                 time.sleep(3)
@@ -183,9 +208,9 @@ def install_python(log=None):
 def install_pip(log=None):
     log("\n⬇️ 修复 pip...")
     get_pip_path = os.path.join(tempfile.gettempdir(), "get-pip.py")
-    # 尝试多个源下载 get-pip.py
-    for m in MIRRORS:
-        if download_file("https://bootstrap.pypa.io/get-pip.py", get_pip_path, log=log): break
+    if not download_file_with_fallback(GET_PIP_URLS, get_pip_path, log=log):
+        log("❌ get-pip.py 所有源均下载失败")
+        return False
     success, _, _ = run_cmd(
         f'"{PYTHON_EXE}" "{get_pip_path}" -i {MIRRORS[0]["url"]} --trusted-host {MIRRORS[0]["host"]}')
     os.remove(get_pip_path)
@@ -219,7 +244,7 @@ def install_system_tools(log=None):
                     shutil.copy(os.path.join(r, "git-lfs.exe"), r"C:\Program Files\Git\cmd\git-lfs.exe")
                     run_cmd(r'"C:\Program Files\Git\cmd\git-lfs.exe" install')
                     break
-            os.remove(zip_path);
+            os.remove(zip_path)
             shutil.rmtree(ext_dir)
     if os.path.exists(os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "vcruntime140.dll")):
         log("✅ VC++ 已安装")
@@ -230,51 +255,92 @@ def install_system_tools(log=None):
             os.remove(installer)
 
 
-# ================= ★ 智能依赖管理 (多源自动降级) =================
+# ================= ★ 智能依赖管理 =================
 def smart_install_requirements(python_exe, log=None):
-    log("\n" + "=" * 40 + "\n智能依赖管理 (四大镜像源自动切换)\n" + "=" * 40)
+    log("\n" + "=" * 40 + "\n智能依赖管理\n" + "=" * 40)
 
-    # 升级 pip (使用阿里云)
+    # 升级 pip
     run_cmd(f'"{python_exe}" -m pip install --upgrade pip -i {MIRRORS[0]["url"]} --trusted-host {MIRRORS[0]["host"]}',
             capture=False)
 
     success, stdout, _ = run_cmd(f'"{python_exe}" -m pip list --format=json', timeout=30)
     installed = {p['name'].lower(): p['version'] for p in json.loads(stdout)} if success else {}
 
-    to_install = []
-    for pkg, (ver, cuda) in REQUIRED_PACKAGES.items():
+    # ================= ★ 第一步：安装 PyTorch GPU 包（独立策略）====================
+    log("\n" + "=" * 40 + "\n【阶段 1】安装 PyTorch GPU 包\n" + "=" * 40)
+
+    pytorch_to_install = []
+    for pkg, ver in PYTORCH_PACKAGES.items():
         inst_ver = installed.get(pkg.lower())
-        if inst_ver and (ver is None or ver.split('+')[0] == inst_ver.split('+')[0]):
+        if inst_ver and ver.split('+')[0] == inst_ver.split('+')[0]:
             log(f"✅ {pkg:<20} [{inst_ver}] (跳过)")
-            continue
-        to_install.append((pkg, ver, cuda))
-        log(f"⏳ {pkg:<20} [需安装: {ver or '最新'}]")
+        else:
+            pytorch_to_install.append(f"{pkg}=={ver}")
+            log(f"⏳ {pkg:<20} [需安装: {ver}]")
 
-    if not to_install: return True
+    if pytorch_to_install:
+        pkg_str = " ".join(pytorch_to_install)
+        log(f"\n🚀 准备安装 PyTorch GPU: {pkg_str}")
+        anti_stuck = "--progress-bar=on --timeout 1000 --retries 10"
 
-    log(f"\n🚀 准备安装 {len(to_install)} 个包...")
+        installed_ok = False
+        for pt_url in PYTORCH_INDEX_URLS:
+            mirror_name = "阿里云" if "aliyun" in pt_url else ("南京大学" if "nju" in pt_url else "官方")
+            log(f"\n 🔄 尝试 PyTorch 源 [{mirror_name}]...")
+            log(f"    URL: {pt_url}")
+
+            # ★ 核心：使用 --index-url 单独指向 PyTorch wheel 源
+            # 不混用 -i，确保 pip 只从 PyTorch 源搜索 torch 包
+            # PyTorch wheel 源是完整的 PEP 503 仓库，包含 torch 及其所有依赖
+            trusted_host = urllib.parse.urlparse(pt_url).netloc
+            cmd = (f'"{python_exe}" -m pip install {pkg_str} '
+                   f'--index-url {pt_url} '
+                   f'--trusted-host {trusted_host} '
+                   f'{anti_stuck}')
+
+            ok = run_cmd(cmd, capture=False)[0]
+            if ok:
+                log(f"✅ [{mirror_name}] PyTorch GPU 安装成功")
+                installed_ok = True
+                break
+            else:
+                log(f"⚠️ [{mirror_name}] 失败，自动切换下一个 PyTorch 源...")
+
+        if not installed_ok:
+            log("❌ 所有 PyTorch 源均安装失败")
+            return False
+    else:
+        log("✅ PyTorch GPU 包已全部安装")
+
+    # ================= ★ 第二步：安装普通 Python 包（四大镜像降级）====================
+    log("\n" + "=" * 40 + "\n【阶段 2】安装普通 Python 包\n" + "=" * 40)
+
+    normal_to_install = []
+    for pkg, ver in REQUIRED_PACKAGES.items():
+        inst_ver = installed.get(pkg.lower())
+        if inst_ver and (ver is None or ver == inst_ver):
+            log(f"✅ {pkg:<20} [{inst_ver}] (跳过)")
+        else:
+            normal_to_install.append((pkg, ver))
+            log(f"⏳ {pkg:<20} [需安装: {ver or '最新'}]")
+
+    if not normal_to_install:
+        log("✅ 所有普通包已安装")
+        return True
+
+    log(f"\n🚀 准备安装 {len(normal_to_install)} 个普通包...")
     anti_stuck = "--progress-bar=on --timeout 1000 --retries 10"
 
-    for i, (pkg, ver, cuda) in enumerate(to_install, 1):
-        log(f"\n[{i}/{len(to_install)}] {pkg}")
+    for i, (pkg, ver) in enumerate(normal_to_install, 1):
+        log(f"\n[{i}/{len(normal_to_install)}] {pkg}")
         pkg_str = f"{pkg}=={ver}" if ver else pkg
 
-        # ★ 核心：遍历四大镜像源，哪个通了用哪个
         installed_ok = False
         for mirror in MIRRORS:
             log(f" 🔄 尝试 [{mirror['name']}]...")
             trusted = f"--trusted-host {mirror['host']}"
-
-            if cuda:
-                cmd = f'"{python_exe}" -m pip install {pkg_str} --extra-index-url {PYTORCH_WHEEL_URL} -i {mirror["url"]} {trusted} {anti_stuck}'
-            else:
-                cmd = f'"{python_exe}" -m pip install {pkg_str} -i {mirror["url"]} {trusted} {anti_stuck}'
-
+            cmd = f'"{python_exe}" -m pip install {pkg_str} -i {mirror["url"]} {trusted} {anti_stuck}'
             ok = run_cmd(cmd, capture=False)[0]
-            if not ok and cuda:
-                cmd_fallback = f'"{python_exe}" -m pip install {pkg_str} --extra-index-url {PYTORCH_WHEEL_URL_FALLBACK} -i {mirror["url"]} {trusted} {anti_stuck}'
-                ok = run_cmd(cmd_fallback, capture=False)[0]
-
             if ok:
                 log(f"✅ [{mirror['name']}] 安装成功")
                 installed_ok = True
@@ -283,8 +349,9 @@ def smart_install_requirements(python_exe, log=None):
                 log(f"⚠️ [{mirror['name']}] 失败或超时，自动切换下一个源...")
 
         if not installed_ok:
-            log("❌ 所有镜像源均安装失败");
+            log("❌ 所有镜像源均安装失败")
             return False
+
     return True
 
 
@@ -305,7 +372,7 @@ def check(name, extra=None):
 print("【1. GPU】")
 def chk(torch):
     if torch.cuda.is_available(): print(f"   🟢 {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB)")
-    else: print("   🟡 CPU")
+    else: print("   🟡 CPU (警告：未检测到 GPU)")
 check("torch", chk)
 print("\\n【2. 核心库】")
 for lib in ["transformers", "peft", "bitsandbytes", "PyQt5", "flask", "duckduckgo_search", "scipy"]: check(lib)
@@ -325,7 +392,7 @@ print("VERIFY_SCRIPT_DONE")
 # ================= 核心调度 =================
 def run_env_setup(log_fn=None):
     log = log_fn or print
-    log("=" * 60 + "\nNEXT AI 环境构建 (多源自动降级终极版)\n" + "=" * 60)
+    log("=" * 60 + "\nNEXT AI 环境构建 (v3.0 最终修正版)\n" + "=" * 60)
 
     need_python = not os.path.exists(PYTHON_EXE)
     need_pip = True
