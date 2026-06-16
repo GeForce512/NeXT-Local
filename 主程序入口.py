@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, subprocess, json, time, shutil, requests
+import sys, os, subprocess, json, time, shutil, requests, site
 from pathlib import Path
 from PyQt5.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QThread
 from PyQt5.QtWidgets import QApplication, QMainWindow
@@ -16,8 +16,32 @@ BASE_DIR = get_base_dir()
 
 
 def resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'): return os.path.join(sys._MEIPASS, relative_path)
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(BASE_DIR, relative_path)
+
+
+# ================= ★ 核心修复：智能环境路由 =================
+def get_python_exe():
+    """
+    智能获取 Python 解释器路径：
+    1. 如果是打包后的环境 (frozen)，且存在独立的 python310 目录，使用它（壳弹分离）。
+    2. 否则（开发环境，如 venv），使用当前运行主程序的 Python 解释器。
+    """
+    if getattr(sys, 'frozen', False):
+        py_path = os.path.join(BASE_DIR, 'python310', 'python.exe')
+        if os.path.exists(py_path):
+            return py_path
+    # 开发环境，直接使用当前 venv 的 python
+    return sys.executable
+
+
+def get_site_packages():
+    """智能获取当前环境的 site-packages 路径"""
+    try:
+        return site.getsitepackages()[0]
+    except Exception:
+        return os.path.join(os.path.dirname(get_python_exe()), 'Lib', 'site-packages')
 
 
 # ================= 1. 环境检测线程 =================
@@ -28,23 +52,29 @@ class EnvCheckWorker(QThread):
     def run(self):
         self.log.emit('🔍 开始进行环境深度体检...')
         base_dir = get_base_dir()
-        python_exe = os.path.join(base_dir, 'python310', 'python.exe')
-        site_packages = os.path.join(base_dir, 'python310', 'Lib', 'site-packages')
-        env_script = os.path.join(base_dir, 'env_setup.py')
+        python_exe = get_python_exe()
+        site_packages = get_site_packages()
+        env_script = os.path.join(base_dir, 'env_setup.py')  # 假设你有个修复脚本
 
         if not os.path.exists(python_exe):
             self.log.emit(f'❌ 找不到 Python 解释器: {python_exe}')
-            self.finished_signal.emit();
+            self.finished_signal.emit()
             return
 
-        self.log.emit('✅ 核心解释器校验通过')
+        self.log.emit(f'✅ 核心解释器校验通过: {os.path.basename(python_exe)}')
 
         torch_path = os.path.join(site_packages, 'torch')
         if not os.path.exists(torch_path):
-            self.log.emit('⚠️ 检测到 AI 核心库 (torch) 缺失！正在自动修复...')
+            self.log.emit('⚠️ 检测到 AI 核心库 (torch) 缺失！')
+            # 如果是开发环境(venv)，直接提示用户用 pip 安装，而不是调用 env_setup.py
+            if 'venv' in python_exe or python_exe == sys.executable:
+                self.log.emit('💡 当前为开发环境，请在终端运行: pip install torch transformers')
+                self.finished_signal.emit()
+                return
+
             if not os.path.exists(env_script):
                 self.log.emit(f'❌ 找不到修复脚本: {env_script}')
-                self.finished_signal.emit();
+                self.finished_signal.emit()
                 return
 
             try:
@@ -60,12 +90,12 @@ class EnvCheckWorker(QThread):
                 process.wait()
                 if process.returncode != 0:
                     self.log.emit(f'❌ 环境修复失败，退出码: {process.returncode}')
-                    self.finished_signal.emit();
+                    self.finished_signal.emit()
                     return
                 self.log.emit('🎉 环境自动下载与修复完成！')
             except Exception as e:
                 self.log.emit(f'❌ 调用异常: {str(e)}')
-                self.finished_signal.emit();
+                self.finished_signal.emit()
                 return
         else:
             self.log.emit('✅ AI 核心库校验通过 (torch 已存在)')
@@ -78,9 +108,11 @@ try:
     print(f"✅ PyTorch: {torch.__version__}")
     if torch.cuda.is_available():
         print(f"🟢 GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
-    else: print("🟡 CUDA 不可用")
+    else: 
+        print("🟡 CUDA 不可用")
     print("VERIFY_DONE")
-except Exception as e: print(f"❌ 验证崩溃: {str(e)[:50]}")
+except Exception as e: 
+    print(f"❌ 验证崩溃: {str(e)[:50]}")
 """
         try:
             env_vars = os.environ.copy()
@@ -96,7 +128,7 @@ except Exception as e: print(f"❌ 验证崩溃: {str(e)[:50]}")
         self.finished_signal.emit()
 
 
-# ================= 2. 模型下载线程 (★ 复用 模型下载.py 核心逻辑) =================
+# ================= 2. 模型下载线程 =================
 class ModelDownloadWorker(QThread):
     log = pyqtSignal(str)
     finished_signal = pyqtSignal(bool, str)
@@ -107,7 +139,6 @@ class ModelDownloadWorker(QThread):
         self.base_dir = base_dir
 
     def run(self):
-        # ★ 完美复刻 模型下载.py 中的 MODEL_LIST 映射关系
         model_map = {
             'Qwen3.5-0.8B': 'Qwen/Qwen3.5-0.8B',
             'Qwen3.5-4B': 'Qwen/Qwen3.5-4B',
@@ -119,29 +150,26 @@ class ModelDownloadWorker(QThread):
             self.finished_signal.emit(False, self.alias)
             return
 
-        python_exe = os.path.join(self.base_dir, 'python310', 'python.exe')
+        python_exe = get_python_exe()
         models_dir = os.path.join(self.base_dir, 'models')
-        # ★ 复刻 模型下载.py 的目录结构：models/别名
         cache_dir = os.path.join(models_dir, self.alias)
 
-        # ★ 动态生成下载脚本 (包含重试逻辑和 master 分支设定)
+        # ★ 加入防 C 盘爆炸的环境变量
         dl_script = f"""
 import sys, os, time
+os.environ["HF_HOME"] = "D:/AI_Cache/huggingface"
+os.environ["MODELSCOPE_CACHE"] = "D:/AI_Cache/modelscope"
 from modelscope import snapshot_download
-
 repo_id = '{repo_id}'
 cache_dir = r'{cache_dir}'
 alias = '{self.alias}'
 os.makedirs(cache_dir, exist_ok=True)
-
 print(f"🚀 [{{alias}}] 开始从 ModelScope 下载...", flush=True)
 print(f"📂 存储目录: {{cache_dir}}", flush=True)
-
 retries = 3
 for attempt in range(1, retries + 1):
     try:
         start = time.time()
-        # ★ 使用 snapshot_download，指定 master 分支
         model_dir = snapshot_download(repo_id, cache_dir=cache_dir, revision='master')
         elapsed = time.time() - start
         mins, secs = divmod(int(elapsed), 60)
@@ -154,14 +182,12 @@ for attempt in range(1, retries + 1):
             wait = 5 * attempt
             print(f"⏳ 等待 {{wait}} 秒后重试...", flush=True)
             time.sleep(wait)
-
 print(f"❌ [{{alias}}] 所有重试均失败！", flush=True)
 sys.exit(1)
 """
         try:
             env_vars = os.environ.copy()
             env_vars['PYTHONIOENCODING'] = 'utf-8'
-
             process = subprocess.Popen(
                 [python_exe, '-u', '-c', dl_script],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -228,20 +254,25 @@ class ChatHandler(QObject):
     def startChat(self):
         if self.inference_process and self.inference_process.poll() is None: return
         base_dir = get_base_dir()
+
+        # 打包环境调用 推理.exe
         if getattr(sys, 'frozen', False):
             inf_exe = os.path.join(base_dir, '推理.exe')
             if os.path.exists(inf_exe):
                 self.inference_process = subprocess.Popen([inf_exe], cwd=base_dir)
-                self.logUpdate.emit('env', '✅ 推理后端已启动');
+                self.logUpdate.emit('env', '✅ 推理后端已启动')
                 return
-        python_exe = os.path.join(base_dir, 'python310', 'python.exe')
+
+        # 开发环境调用 推理.py (★ 使用智能路由的 python_exe)
+        python_exe = get_python_exe()
         inf_py = os.path.join(base_dir, '推理.py')
         if os.path.exists(inf_py) and os.path.exists(python_exe):
             self.inference_process = subprocess.Popen([python_exe, '-u', inf_py], cwd=base_dir)
+            self.logUpdate.emit('env', '✅ 推理后端已启动')
 
     @pyqtSlot()
     def getDatasetList(self):
-        data_dir = os.path.join(BASE_DIR, 'datasets');
+        data_dir = os.path.join(BASE_DIR, 'datasets')
         os.makedirs(data_dir, exist_ok=True)
         items = [{'name': f, 'path': os.path.join(data_dir, f),
                   'lines': sum(1 for _ in open(os.path.join(data_dir, f), encoding='utf-8'))} for f in
@@ -250,9 +281,9 @@ class ChatHandler(QObject):
 
     @pyqtSlot(str, str)
     def saveDataset(self, name, content):
-        path = os.path.join(BASE_DIR, 'datasets', name);
+        path = os.path.join(BASE_DIR, 'datasets', name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        open(path, 'w', encoding='utf-8').write(content);
+        open(path, 'w', encoding='utf-8').write(content)
         self.getDatasetList()
 
     @pyqtSlot(str)
@@ -262,11 +293,13 @@ class ChatHandler(QObject):
 
     @pyqtSlot(str, str)
     def updateDataset(self, path, content):
-        open(path, 'w', encoding='utf-8').write(content); self.getDatasetList()
+        open(path, 'w', encoding='utf-8').write(content)
+        self.getDatasetList()
 
     @pyqtSlot(str)
     def deleteDataset(self, path):
-        os.remove(path); self.getDatasetList()
+        os.remove(path)
+        self.getDatasetList()
 
     @pyqtSlot(str)
     def startTrain(self, c):
@@ -274,7 +307,7 @@ class ChatHandler(QObject):
 
     @pyqtSlot()
     def getLoraWeights(self):
-        lora_dir = os.path.join(BASE_DIR, 'lora_weights');
+        lora_dir = os.path.join(BASE_DIR, 'lora_weights')
         os.makedirs(lora_dir, exist_ok=True)
         items = [{'name': d, 'path': f'lora_weights/{d}'} for d in os.listdir(lora_dir) if
                  os.path.isdir(os.path.join(lora_dir, d))]
@@ -283,14 +316,15 @@ class ChatHandler(QObject):
     @pyqtSlot(str)
     def switchLora(self, path):
         try:
-            requests.post('http://127.0.0.1:5000/api/lora/switch', json={'lora_path': path},
-                          timeout=5); self.logUpdate.emit('data-management', '✅ 切换成功')
+            requests.post('http://127.0.0.1:5000/api/lora/switch', json={'lora_path': path}, timeout=5)
+            self.logUpdate.emit('data-management', '✅ 切换成功')
         except:
-            self.logUpdate.emit('data-management', '❌ 无法连接')
+            self.logUpdate.emit('data-management', '❌ 无法连接后端')
 
     @pyqtSlot(str)
     def deleteLora(self, path):
-        shutil.rmtree(os.path.join(BASE_DIR, path)); self.getLoraWeights()
+        shutil.rmtree(os.path.join(BASE_DIR, path))
+        self.getLoraWeights()
 
     @pyqtSlot()
     def goHome(self):
@@ -300,25 +334,27 @@ class ChatHandler(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NEXT AI");
+        self.setWindowTitle("NEXT AI")
         self.resize(1200, 800)
         QWebEngineProfile.defaultProfile().setHttpCacheType(QWebEngineProfile.NoCache)
-        self.browser = QWebEngineView();
+        self.browser = QWebEngineView()
         self.setCentralWidget(self.browser)
         self.handler = ChatHandler(self)
-        self.channel = QWebChannel();
+        self.channel = QWebChannel()
         self.channel.registerObject('chatObject', self.handler)
         self.browser.page().setWebChannel(self.channel)
         html_path = resource_path(os.path.join('前端', '主程序界面.html'))
-        if os.path.exists(html_path): self.browser.setUrl(QUrl.fromLocalFile(html_path))
+        if os.path.exists(html_path):
+            self.browser.setUrl(QUrl.fromLocalFile(html_path))
 
     def closeEvent(self, event):
-        if self.handler.inference_process and self.handler.inference_process.poll() is None: self.handler.inference_process.terminate()
+        if self.handler.inference_process and self.handler.inference_process.poll() is None:
+            self.handler.inference_process.terminate()
         event.accept()
 
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv);
-    window = MainWindow();
-    window.show();
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec_())

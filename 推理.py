@@ -2,7 +2,13 @@
 import os, sys, json, time, threading, argparse, random
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+import os
+# 强制把模型缓存重定向到 D 盘，彻底拯救 C 盘！
+os.environ["HF_HOME"] = "D:/AI_Cache/huggingface"
+os.environ["MODELSCOPE_CACHE"] = "D:/AI_Cache/modelscope"
+os.environ["TRANSFORMERS_CACHE"] = "D:/AI_Cache/huggingface"
 
+# ... 下面接着写你原来的 import flask 等代码 ...
 
 def exe_dir():
     return os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(

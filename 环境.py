@@ -9,7 +9,13 @@ NEXT AI 环境构建 (v3.0 最终修正版)
 - 保留原生进度条与深度验证报告
 """
 import os, sys, subprocess, urllib.request, zipfile, tempfile, time, shutil, ssl, json, importlib
+import os
+# 强制把模型缓存重定向到 D 盘，彻底拯救 C 盘！
+os.environ["HF_HOME"] = "D:/AI_Cache/huggingface"
+os.environ["MODELSCOPE_CACHE"] = "D:/AI_Cache/modelscope"
+os.environ["TRANSFORMERS_CACHE"] = "D:/AI_Cache/huggingface"
 
+# ... 下面接着写你原来的 import flask 等代码 ...
 
 def exe_dir():
     return os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(

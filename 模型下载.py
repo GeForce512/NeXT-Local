@@ -9,7 +9,13 @@ import os
 import sys
 import time
 from modelscope import snapshot_download
+import os
+# 强制把模型缓存重定向到 D 盘，彻底拯救 C 盘！
+os.environ["HF_HOME"] = "D:/AI_Cache/huggingface"
+os.environ["MODELSCOPE_CACHE"] = "D:/AI_Cache/modelscope"
+os.environ["TRANSFORMERS_CACHE"] = "D:/AI_Cache/huggingface"
 
+# ... 下面接着写你原来的 import flask 等代码 ...
 # ==================== 可移植路径配置 ====================
 def exe_dir():
     """获取可执行文件所在目录（兼容 PyInstaller 打包和直接运行脚本）"""
