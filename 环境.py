@@ -86,7 +86,7 @@ REQUIRED_PACKAGES = {
     "safetensors": "0.5.2", "PyQt5": "5.15.11", "PyQtWebEngine": "5.15.7",
     "flask": "3.1.0", "flask-cors": "5.0.0", "numpy": "1.26.4",
     "pillow": "10.4.0", "tqdm": None, "requests": None,
-    "modelscope": "1.22.0", "duckduckgo-search": "6.2.1", "scipy": None
+    "modelscope": "1.22.0"
 }
 
 
@@ -381,7 +381,7 @@ def chk(torch):
     else: print("   🟡 CPU (警告：未检测到 GPU)")
 check("torch", chk)
 print("\\n【2. 核心库】")
-for lib in ["transformers", "peft", "bitsandbytes", "PyQt5", "flask", "duckduckgo_search", "scipy"]: check(lib)
+for lib in ["transformers", "peft", "bitsandbytes", "PyQt5", "flask"]: check(lib)
 print("\\n" + "="*60)
 print(f"🎉 验证完成: {passed}/{total} 项通过。")
 print("VERIFY_SCRIPT_DONE")
@@ -435,4 +435,8 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n异常: {e}")
     finally:
-        input("\n按 Enter 退出...")
+        try:
+            if sys.stdin and sys.stdin.isatty():
+                input("\n按 Enter 退出...")
+        except (EOFError, OSError):
+            pass

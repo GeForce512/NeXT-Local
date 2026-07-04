@@ -20,7 +20,6 @@ MAIN_HIDDEN_IMPORTS = [
     'PyQt5.QtWebEngine', 'PyQt5.QtWebEngineCore',
     'requests', 'yaml', 'jinja2'
 ]
-INFERENCE_HIDDEN_IMPORTS = ['flask', 'flask_cors', 'requests']
 EXCLUDE_MODULES = [
     'torch', 'torchvision', 'torchaudio', 'transformers', 'accelerate', 'peft',
     'sentencepiece', 'tokenizers', 'huggingface_hub', 'datasets', 'bitsandbytes',
@@ -109,7 +108,7 @@ def build():
     exe_folder = DIST / EXE_NAME
     sep = ';' if os.name == 'nt' else ':'
 
-    print("\n🚀 [1/4] 打包主程序 (NeXT.exe)...")
+    print("\n🚀 [1/3] 打包主程序 (NeXT.exe)...")
     cmd_main = [sys.executable, '-m', 'PyInstaller', '--windowed', f'--name={EXE_NAME}',
                 f'--add-data=前端{sep}前端', '--clean', '--distpath', str(DIST), '主程序入口.py']
     if ICON_FILE.exists(): cmd_main.insert(3, f'--icon={ICON_FILE}')
@@ -117,15 +116,7 @@ def build():
     for mod in EXCLUDE_MODULES: cmd_main += ['--exclude-module', mod]
     subprocess.check_call(cmd_main, cwd=ROOT)
 
-    print("\n🧠 [2/4] 打包推理程序 (推理.exe)...")
-    cmd_inf = [sys.executable, '-m', 'PyInstaller', '--console', '--onefile', '--name=推理',
-               '--distpath', str(exe_folder), '--clean', '推理.py']
-    if ICON_FILE.exists(): cmd_inf.insert(4, f'--icon={ICON_FILE}')
-    for mod in INFERENCE_HIDDEN_IMPORTS: cmd_inf += ['--hidden-import', mod]
-    for mod in EXCLUDE_MODULES + ['PyQt5']: cmd_inf += ['--exclude-module', mod]
-    subprocess.check_call(cmd_inf, cwd=ROOT)
-
-    print("\n⚙️ [3/4] 部署运行时环境...")
+    print("\n🧠 [2/3] 部署运行时环境...")
     deploy_embedded_python(exe_folder)
 
     # 复制环境配置脚本
@@ -134,13 +125,22 @@ def build():
         shutil.copy2(env_script, exe_folder / 'env_setup.py')
         print("  ✔ 环境.py 已重命名为 env_setup.py 并复制")
 
-    # ★ 复制你的批量下载脚本 (作为备用工具)
+    # 复制批量下载脚本
     batch_dl_script = ROOT / '模型下载.py'
     if batch_dl_script.exists():
         shutil.copy2(batch_dl_script, exe_folder / 'download_all_models.py')
-        print("  ✔ 模型下载.py 已重命名为 download_all_models.py 并复制 (备用批量工具)")
+        print("  ✔ 模型下载.py 已重命名为 download_all_models.py 并复制")
 
-    print("\n🛠️ [4/4] 补全 QtWebEngine 资源...")
+    # ★ 复制推理和训练脚本（由嵌入式 Python 运行，不打包为 exe）
+    for script_name in ['推理.py', '训练.py']:
+        src = ROOT / script_name
+        if src.exists():
+            shutil.copy2(src, exe_folder / script_name)
+            print(f"  ✔ {script_name} 已复制")
+        else:
+            print(f"  ⚠️ {script_name} 未找到，跳过")
+
+    print("\n🛠️ [3/3] 补全 QtWebEngine 资源...")
     proc = QT_DIR / 'bin' / 'QtWebEngineProcess.exe'
     if proc.exists(): shutil.copy2(proc, exe_folder / 'QtWebEngineProcess.exe')
     qt_bin = QT_DIR / 'bin'

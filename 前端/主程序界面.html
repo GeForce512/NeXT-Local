@@ -2,141 +2,203 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NEXT AI - 下一代工作台</title>
+    <title>NeXT</title>
     <link rel="stylesheet" href="界面样式.css">
 </head>
 <body>
-    <button id="home-btn" title="返回主页">←</button>
-
-    <div id="dock">
-        <div class="dock-item active" data-page="env"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></div>
-        <div class="dock-item" data-page="download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></div>
-        <div class="dock-item" data-page="data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></div>
-        <div class="dock-item" data-page="train"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line></svg></div>
-        <div class="dock-item" data-page="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
-        <div class="dock-item" data-page="data-management"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></div>
+    <!-- Custom Title Bar -->
+    <div id="title-bar">
+        <div id="drag-region"></div>
+        <div id="title-bar-right">
+            <div id="nav-group">
+                <button class="nav-btn active" data-page="train" data-i18n="nav.train">训练</button>
+                <span class="nav-divider"></span>
+                <button class="nav-btn" data-page="chat" data-i18n="nav.chat">推理</button>
+                <span class="nav-divider"></span>
+                <button class="nav-btn" data-page="settings" data-i18n="nav.settings">设置</button>
+            </div>
+            <div id="window-controls">
+                <button id="win-minimize" class="win-btn" title="最小化">&#x2013;</button>
+                <button id="win-maximize" class="win-btn win-max-btn" title="最大化">&#x25A1;</button>
+                <button id="win-close" class="win-btn win-close-btn" title="关闭">&#x2715;</button>
+            </div>
+        </div>
     </div>
 
     <div id="main-content">
-        <div class="content-header">
-            <h1 id="page-title">环境监测</h1>
-            <button id="theme-toggle-btn" class="theme-toggle-btn" title="切换明暗模式">
-                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-                <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-            </button>
-        </div>
 
-        <!-- 1. 环境监测 -->
-        <div class="page-container active" id="env-content">
-            <div class="card"><div class="card-title"><span>运行环境检查</span></div><div class="module"><button class="btn btn-primary" id="env-btn">开始检测</button></div></div>
-            <div class="card"><div class="log-box" id="env-log">等待检测...</div></div>
-        </div>
-
-        <!-- 2. 模型获取 -->
-        <div class="page-container" id="download-content">
-            <div class="card">
-                <div class="card-title"><span>模型获取</span></div>
+        <!-- ===== 训练 ===== -->
+        <div class="page-container active" id="train-content">
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="train.config_title">训练配置</span></div>
                 <div class="module">
-                    <select class="form-select" id="model-select">
-                        <option value="Qwen3.5-0.8B">Qwen3.5-0.8B (轻量模型)</option>
-                        <option value="Qwen3.5-4B" selected>Qwen3.5-4B (基础模型)</option>
-                    </select>
-                    <button class="btn btn-primary" id="download-btn" style="margin-top:12px">开始下载</button>
-                </div>
-            </div>
-            <div class="card"><div class="log-box" id="download-log">等待下载...</div></div>
-        </div>
-
-        <!-- 3. 数据准备 -->
-        <div class="page-container" id="data-content">
-            <div class="card">
-                <div class="card-title"><span>数据集管理</span></div>
-                <div id="drop-zone" class="drop-zone">
-                    <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                    <p class="drop-text">拖拽 JSONL / TXT / CSV 到此处，或 <span class="drop-highlight">点击上传</span></p>
-                    <input type="file" id="file-input" multiple accept=".jsonl,.txt,.csv" style="display: none;">
-                </div>
-                <div id="dataset-grid" class="card-grid"><div class="empty-state" id="dataset-empty"><p>暂无数据集，请上传文件</p></div></div>
-            </div>
-            <div class="card"><div class="log-box" id="data-log">等待操作...</div></div>
-        </div>
-
-        <!-- 4. 模型微调 -->
-        <div class="page-container" id="train-content">
-            <div class="card">
-                <div class="card-title"><span>训练配置</span></div>
-                <div class="module">
-                    <div class="form-group"><label class="form-label">LoRA 名称</label><input type="text" class="form-input" id="lora-name-input" placeholder="例如：medical_v1" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="train.lora_name">LoRA 名称</label><input type="text" class="form-input" id="lora-name-input" placeholder="例如：medical_v1" /></div>
                     <div class="form-group">
-                        <label class="form-label">训练模式</label>
+                        <label class="form-label" data-i18n="train.mode">训练模式</label>
                         <div class="radio-group">
-                            <label class="radio-card active"><input type="radio" name="train-mode" value="new" checked><span class="radio-title">🚀 全新训练</span></label>
-                            <label class="radio-card"><input type="radio" name="train-mode" value="continue"><span class="radio-title">🔄 增量训练</span></label>
+                            <label class="radio-card active"><input type="radio" name="train-mode" value="new" checked><span class="radio-title" data-i18n="train.mode_new">全新训练</span></label>
+                            <label class="radio-card"><input type="radio" name="train-mode" value="continue"><span class="radio-title" data-i18n="train.mode_continue">增量训练</span></label>
                         </div>
                     </div>
-                    <div class="form-group" id="base-lora-group" style="display: none;"><label class="form-label">基础 LoRA</label><select class="form-select" id="base-lora-select"></select></div>
-                    <div class="form-group"><label class="form-label">训练数据集</label><select class="form-select" id="dataset-select"></select></div>
-                    <button class="btn btn-primary" id="train-btn">开始训练</button>
+                    <div class="form-group" id="base-lora-group" style="display:none;"><label class="form-label" data-i18n="train.base_lora">基础 LoRA</label><select class="form-select" id="base-lora-select"></select></div>
+                    <div class="form-group"><label class="form-label" data-i18n="train.dataset">训练数据集</label><select class="form-select" id="dataset-select"></select></div>
+                    <button class="btn btn-primary" id="train-btn" data-i18n="train.start_btn">开始训练</button>
                 </div>
             </div>
-            <div class="card"><div class="log-box" id="train-log">等待训练...</div></div>
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="train.monitor_title">训练监控</span></div>
+                <div class="chart-tabs">
+                    <button class="chart-tab active" data-chart="loss">Loss</button>
+                    <button class="chart-tab" data-chart="lr">Learning Rate</button>
+                </div>
+                <div class="chart-wrap"><canvas id="train-chart"></canvas></div>
+                <div class="log-section">
+                    <button class="log-toggle" data-target="train-log"><span class="toggle-arrow">&#9654;</span> <span data-i18n="log.train">训练日志</span></button>
+                    <div class="log-box collapsed" id="train-log">等待训练...</div>
+                </div>
+            </div>
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="train.dataset_title">数据集管理</span></div>
+                <div id="drop-zone" class="drop-zone">
+                    <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <p class="drop-text"><span data-i18n="train.drop_text">拖拽 JSONL / TXT / CSV 到此处，或</span> <span class="drop-highlight" data-i18n="train.click_upload">点击上传</span></p>
+                    <input type="file" id="file-input" multiple accept=".jsonl,.txt,.csv" style="display:none;">
+                </div>
+                <div id="dataset-grid" class="card-grid"><div class="empty-state" id="dataset-empty"><p data-i18n="train.no_dataset">暂无数据集，请上传文件</p></div></div>
+            </div>
         </div>
 
-        <!-- 5. AI 对话 (★ 纯净版，无 Canvas) -->
+        <!-- ===== 对话 ===== -->
         <div class="page-container" id="chat-content">
             <div class="chat-workspace-card">
                 <aside id="chat-sidebar" class="chat-sidebar">
-                    <div class="sidebar-header"><span>历史记录</span><button id="new-chat-btn" class="icon-btn" title="新对话">+</button></div>
+                    <div class="sidebar-header"><span data-i18n="chat.history">历史记录</span><button id="new-chat-btn" class="icon-btn" title="新对话">+</button></div>
                     <div id="history-list" class="history-list"></div>
                 </aside>
                 <main class="chat-main">
                     <div class="chat-top-bar">
-                        <button id="sidebar-toggle" class="sidebar-toggle-btn" title="展开/折叠历史">☰</button>
+                        <button id="sidebar-toggle" class="sidebar-toggle-btn" title="展开/折叠历史">&#9776;</button>
                         <div id="lora-capsule" class="capsule">
-                            <span id="capsule-text">🔴 模型未启动</span>
+                            <span id="capsule-text">&#128308; 模型未启动</span>
                             <svg class="capsule-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                             <div id="capsule-dropdown" class="capsule-dropdown"></div>
                         </div>
                     </div>
+                    <div class="scroll-blur-edge scroll-blur-top"></div>
                     <div id="chat-messages" class="chat-messages"></div>
+                    <div class="scroll-blur-edge scroll-blur-bottom"></div>
                     <div class="chat-bottom-bar">
                         <div id="magic-switches" class="magic-switches">
-                            <div class="switch-pill" data-feature="thinking" title="深度思考 (CoT)">
+                            <div class="switch-pill" data-feature="thinking" data-i18n-title="chat.thinking_tip" title="深度思考 (CoT)">
                                 <svg class="pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8z"/><path d="M10 22h4"/></svg>
-                                <span class="pill-text">深度思考</span>
+                                <span class="pill-text" data-i18n="chat.thinking">深度思考</span>
                             </div>
                         </div>
                         <div class="smart-input-area">
-                            <input type="text" id="chat-input" class="chat-input" placeholder="输入消息..." disabled />
-                            <button id="chat-send-btn" class="btn chat-send-btn" disabled>⚡ 发送</button>
-                            <button id="chat-stop-btn" class="btn stop-btn" style="display: none;">停止</button>
+                            <input type="text" id="chat-input" class="chat-input" data-i18n-placeholder="chat.input_placeholder" placeholder="输入消息..." disabled />
+                            <button id="chat-send-btn" class="btn chat-send-btn" disabled data-i18n="chat.send">发送</button>
+                            <button id="chat-stop-btn" class="btn stop-btn" style="display:none;" data-i18n="chat.stop">停止</button>
                         </div>
                     </div>
                 </main>
             </div>
         </div>
 
-        <!-- 6. LoRA 权重管理 -->
-        <div class="page-container" id="data-management-content">
-            <div class="card">
-                <div class="card-title"><span>LoRA 权重库</span></div>
-                <div class="btn-group" style="margin-bottom: 16px;">
-                    <button class="btn btn-primary" id="refresh-lora-btn">刷新</button>
-                    <button class="btn btn-secondary" id="delete-lora-btn">删除选中</button>
-                    <button class="btn btn-accent" id="switch-lora-btn">切换选中</button>
+        <!-- ===== 设置 ===== -->
+        <div class="page-container" id="settings-content">
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="settings.env_title">环境与依赖</span></div>
+                <div class="module">
+                    <p class="settings-desc" data-i18n="settings.env_desc">检测 GPU 设备并安装所需运行库（PyTorch / Transformers 等）</p>
+                    <button class="btn btn-primary" id="env-btn" data-i18n="settings.env_btn">开始检测</button>
                 </div>
-                <div id="lora-grid" class="card-grid"><div class="empty-state" id="lora-empty"><p>暂无 LoRA 权重</p></div></div>
+                <div class="log-section">
+                    <button class="log-toggle" data-target="env-log"><span class="toggle-arrow">&#9654;</span> <span data-i18n="log.env">检测日志</span></button>
+                    <div class="log-box collapsed" id="env-log">等待检测...</div>
+                </div>
             </div>
-            <div class="card"><div class="log-box" id="data-management-log">等待操作...</div></div>
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="settings.model_title">模型管理</span></div>
+                <div class="module">
+                    <select class="form-select" id="model-select">
+                        <option value="Qwen3.5-0.8B">Qwen3.5-0.8B (轻量)</option>
+                        <option value="Qwen3.5-4B" selected>Qwen3.5-4B (基础)</option>
+                    </select>
+                    <button class="btn btn-primary" id="download-btn" style="margin-top:12px;" data-i18n="settings.download_btn">开始下载</button>
+                </div>
+                <div class="log-section">
+                    <button class="log-toggle" data-target="download-log"><span class="toggle-arrow">&#9654;</span> <span data-i18n="log.download">下载日志</span></button>
+                    <div class="log-box collapsed" id="download-log">等待下载...</div>
+                </div>
+            </div>
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="settings.lora_title">LoRA 权重</span></div>
+                <div class="btn-group" style="margin-bottom:16px;">
+                    <button class="btn btn-primary" id="refresh-lora-btn" data-i18n="settings.refresh">刷新</button>
+                    <button class="btn btn-secondary" id="delete-lora-btn" data-i18n="settings.delete">删除选中</button>
+                    <button class="btn btn-accent" id="switch-lora-btn" data-i18n="settings.switch">切换选中</button>
+                </div>
+                <div id="lora-grid" class="card-grid"><div class="empty-state" id="lora-empty"><p data-i18n="settings.no_lora">暂无 LoRA 权重</p></div></div>
+                <div class="log-section">
+                    <button class="log-toggle" data-target="settings-lora-log"><span class="toggle-arrow">&#9654;</span> <span data-i18n="log.lora">操作日志</span></button>
+                    <div class="log-box collapsed" id="settings-lora-log">等待操作...</div>
+                </div>
+            </div>
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="settings.params_title">训练参数</span></div>
+                <div class="module">
+                    <div class="form-group"><label class="form-label" data-i18n="settings.lr">学习率</label><input type="number" class="form-input" id="lr-input" value="0.0003" step="0.0001" min="0.00001" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.epochs">训练轮数 (Epochs)</label><input type="number" class="form-input" id="epochs-input" value="4" min="1" max="100" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.seqlen">最大序列长度</label><input type="number" class="form-input" id="seqlen-input" value="512" step="64" min="128" max="4096" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.batch_size">批次大小 (Batch Size)</label><input type="number" class="form-input" id="batchsize-input" value="4" min="1" max="64" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.optimizer">优化器</label><select class="form-select" id="optimizer-select"><option value="adamw" selected>AdamW</option><option value="sgd">SGD</option><option value="adafactor">Adafactor</option></select></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.weight_decay">正则化系数 (Weight Decay)</label><input type="number" class="form-input" id="weightdecay-input" value="0.01" step="0.001" min="0" max="1" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.lora_r">LoRA Rank (r)</label><input type="number" class="form-input" id="lorar-input" value="16" min="4" max="128" step="4" /></div>
+                    <div class="form-group"><label class="form-label" data-i18n="settings.lora_alpha">LoRA Alpha</label><input type="number" class="form-input" id="loraalpha-input" value="32" min="1" max="256" /></div>
+                </div>
+            </div>
+            <div class="card halftone-target">
+                <canvas class="halftone-overlay"></canvas>
+                <div class="card-title"><span data-i18n="settings.appearance_title">外观与语言</span></div>
+                <div class="module">
+                    <div class="form-group">
+                        <label class="form-label" data-i18n="settings.theme_mode">主题模式</label>
+                        <div class="inline-control">
+                            <button id="theme-toggle-btn" class="btn btn-secondary theme-toggle-btn" title="切换明暗模式">
+                                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                                <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                                <span class="theme-label" data-i18n="settings.toggle_theme">切换明暗</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" data-i18n="settings.language">语言</label>
+                        <select class="form-select" id="language-select">
+                            <option value="zh-CN" selected>简体中文</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
+    <!-- Toast -->
+    <div id="toast" class="toast"><span id="toast-text"></span></div>
+
+    <!-- Dataset Editor Modal -->
     <div id="editor-modal" class="modal-overlay">
         <div class="modal-content">
-            <div class="modal-header"><h3 id="modal-title">编辑数据集</h3><button class="modal-close" id="modal-cancel-btn">×</button></div>
+            <div class="modal-header"><h3 id="modal-title" data-i18n="modal.edit_dataset">编辑数据集</h3><button class="modal-close" id="modal-cancel-btn">&#x2715;</button></div>
             <textarea id="modal-editor" class="modal-textarea"></textarea>
-            <div class="modal-footer"><button class="btn btn-secondary" id="modal-delete-btn">删除</button><button class="btn btn-primary" id="modal-save-btn">保存</button></div>
+            <div class="modal-footer"><button class="btn btn-secondary" id="modal-delete-btn" data-i18n="modal.delete">删除</button><button class="btn btn-primary" id="modal-save-btn" data-i18n="modal.save">保存</button></div>
         </div>
     </div>
 
