@@ -3,7 +3,7 @@
 // ============================================================
 
 // ==================== DOM References ====================
-const navBtns = document.querySelectorAll('.nav-btn');
+const navBtns = document.querySelectorAll('.toolbar-circle-btn[data-page]');
 const chatSidebar = document.getElementById('chat-sidebar');
 const historyList = document.getElementById('history-list');
 const newChatBtn = document.getElementById('new-chat-btn');
@@ -51,26 +51,31 @@ let isGenerating = false, isWakingUp = false, currentAbortController = null;
 let currentEditingDataset = null, selectedLoraPath = null;
 let sessions = [], currentSessionId = null;
 let magicStates = { thinking: false };
-let currentPage = 'train';
+let currentPage = 'chat';
 let currentLang = 'zh-CN';
 
 // Temperature hue animation state
 let currentHue = 220, targetHue = 220, animFrame = null;
 
+// GPU monitoring state (from Python nvidia-smi)
+let sidebarGpuStats = [];
+
 // ==================== i18n ====================
 const i18n = {
     'zh-CN': {
-        'nav.train': '训练', 'nav.chat': '推理', 'nav.settings': '设置',
+        'nav.train': '训练', 'nav.chat': '对话', 'nav.settings': '设置', 'nav.model': '模型',
+        'chat.new_chat': '新建对话', 'chat.model_switch': '模型切换', 'chat.history_toggle': '历史记录',
         'train.config_title': '训练配置', 'train.lora_name': 'LoRA 名称',
         'train.mode': '训练模式', 'train.mode_new': '全新训练', 'train.mode_continue': '增量训练',
         'train.base_lora': '基础 LoRA', 'train.dataset': '训练数据集',
         'train.start_btn': '开始训练', 'train.monitor_title': '训练监控',
         'train.dataset_title': '数据集管理',
-        'train.drop_text': '拖拽 JSONL / TXT / CSV 到此处，或', 'train.click_upload': '点击上传',
+        'train.drop_text': '拖拽 JSONL / JSON / TXT / CSV 到此处，或', 'train.click_upload': '点击上传',
         'train.no_dataset': '暂无数据集，请上传文件',
         'chat.history': '历史记录', 'chat.thinking': '深度思考',
         'chat.thinking_tip': '深度思考 (CoT)', 'chat.input_placeholder': '输入消息...',
         'chat.send': '发送', 'chat.stop': '停止',
+        'model.download_title': '模型下载', 'model.download_desc': '从 ModelScope 下载基础模型到本地',
         'settings.env_title': '环境与依赖', 'settings.env_desc': '检测 GPU 设备并安装所需运行库（PyTorch / Transformers 等）',
         'settings.env_btn': '开始检测', 'settings.model_title': '模型管理',
         'settings.download_btn': '开始下载', 'settings.lora_title': 'LoRA 权重',
@@ -88,17 +93,19 @@ const i18n = {
         'toast.first_launch': '请在设置中检查设备配置',
     },
     'en': {
-        'nav.train': 'Train', 'nav.chat': 'Chat', 'nav.settings': 'Settings',
+        'nav.train': 'Train', 'nav.chat': 'Chat', 'nav.settings': 'Settings', 'nav.model': 'Model',
+        'chat.new_chat': 'New Chat', 'chat.model_switch': 'Model Switch', 'chat.history_toggle': 'History',
         'train.config_title': 'Training Config', 'train.lora_name': 'LoRA Name',
         'train.mode': 'Training Mode', 'train.mode_new': 'New Training', 'train.mode_continue': 'Continuation',
         'train.base_lora': 'Base LoRA', 'train.dataset': 'Dataset',
         'train.start_btn': 'Start Training', 'train.monitor_title': 'Training Monitor',
         'train.dataset_title': 'Dataset Management',
-        'train.drop_text': 'Drag JSONL / TXT / CSV here, or', 'train.click_upload': 'click to upload',
+        'train.drop_text': 'Drag JSONL / JSON / TXT / CSV here, or', 'train.click_upload': 'click to upload',
         'train.no_dataset': 'No datasets yet, please upload files',
         'chat.history': 'History', 'chat.thinking': 'Deep Think',
         'chat.thinking_tip': 'Deep Thinking (CoT)', 'chat.input_placeholder': 'Type a message...',
         'chat.send': 'Send', 'chat.stop': 'Stop',
+        'model.download_title': 'Model Download', 'model.download_desc': 'Download base models from ModelScope to local',
         'settings.env_title': 'Environment & Dependencies',
         'settings.env_desc': 'Detect GPU devices and install required libraries (PyTorch / Transformers, etc.)',
         'settings.env_btn': 'Detect', 'settings.model_title': 'Model Management',
@@ -169,18 +176,18 @@ function simpleMarkdown(text) {
 }
 
 // ==================== Theme ====================
-const themeMap = { train: 'theme-train', chat: 'theme-chat', settings: 'theme-settings' };
-
 function applyTheme(pageId) {
-    document.body.className = document.body.className.replace(/theme-\S+/g, '').trim();
-    if (themeMap[pageId]) document.body.classList.add(themeMap[pageId]);
-    // Restore light/dark from memory variable (no localStorage)
-    if (window._isLightTheme) document.body.classList.add('light-theme');
+    const container = document.getElementById('app-container');
+    if (!container) return;
+    // No per-page hue themes — only light/dark
+    if (window._isLightTheme) container.classList.add('light-theme');
 }
 
 function toggleTheme() {
-    document.body.classList.toggle('light-theme');
-    window._isLightTheme = document.body.classList.contains('light-theme');
+    const container = document.getElementById('app-container');
+    if (!container) return;
+    container.classList.toggle('light-theme');
+    window._isLightTheme = container.classList.contains('light-theme');
     // Redraw halftone overlays
     if (window._halftoneInstances) {
         window._halftoneInstances.forEach(inst => inst.forceRedraw());
@@ -209,15 +216,17 @@ function initWindowControls() {
         });
     }
     if (maxBtn) {
+        const maximizeSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+        const restoreSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="10" height="10" rx="1.5"/><rect x="10" y="10" width="10" height="10" rx="1.5"/></svg>';
         maxBtn.addEventListener('click', () => {
             if (!window.chatObject) return;
             if (isMaximized) {
                 window.chatObject.restoreWindow();
-                maxBtn.innerHTML = '&#x25A1;';
+                maxBtn.innerHTML = maximizeSVG;
                 maxBtn.title = '最大化';
             } else {
                 window.chatObject.maximizeWindow();
-                maxBtn.innerHTML = '&#x29C9;';
+                maxBtn.innerHTML = restoreSVG;
                 maxBtn.title = '还原';
             }
             isMaximized = !isMaximized;
@@ -233,7 +242,9 @@ function initWindowControls() {
         window.chatObject.windowStateChanged.connect((maximized) => {
             isMaximized = maximized;
             if (maxBtn) {
-                maxBtn.innerHTML = maximized ? '&#x29C9;' : '&#x25A1;';
+                const maximizeSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+                const restoreSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="10" height="10" rx="1.5"/><rect x="10" y="10" width="10" height="10" rx="1.5"/></svg>';
+                maxBtn.innerHTML = maximized ? restoreSVG : maximizeSVG;
                 maxBtn.title = maximized ? '还原' : '最大化';
             }
         });
@@ -242,38 +253,36 @@ function initWindowControls() {
 
 // ==================== Window Drag (QWebEngineView) ====================
 function initWindowDrag() {
-    const dragRegion = document.getElementById('drag-region');
-    if (!dragRegion) return;
+    // Non-draggable elements (buttons, groups, etc.)
+    function isNoDragTarget(el) {
+        while (el && el !== document.body) {
+            if (el.tagName === 'BUTTON' || el.tagName === 'SELECT' || el.tagName === 'INPUT') return true;
+            if (el.classList && (el.classList.contains('toolbar-circle-group') || el.classList.contains('capsule'))) return true;
+            if (el.id === 'window-controls') return true;
+            el = el.parentElement;
+        }
+        return false;
+    }
 
-    let dragging = false;
-    let winX = 0, winY = 0;
-    let lastScreenX = 0, lastScreenY = 0;
-
-    dragRegion.addEventListener('mousedown', (e) => {
+    function handleDragStart(e) {
         if (e.button !== 0) return;
-        dragging = true;
-        lastScreenX = e.screenX;
-        lastScreenY = e.screenY;
-        const rect = dragRegion.getBoundingClientRect();
-        winX = Math.round(e.screenX - e.clientX + rect.left);
-        winY = Math.round(e.screenY - e.clientY + rect.top);
+        if (isNoDragTarget(e.target)) return;
         e.preventDefault();
-    });
+        // Use native Windows drag — OS handles everything
+        if (window.chatObject && window.chatObject.startSystemDrag) {
+            window.chatObject.startSystemDrag();
+        }
+    }
 
-    document.addEventListener('mousemove', (e) => {
-        if (!dragging || !window.chatObject) return;
-        const dx = e.screenX - lastScreenX;
-        const dy = e.screenY - lastScreenY;
-        if (dx === 0 && dy === 0) return;
-        lastScreenX = e.screenX;
-        lastScreenY = e.screenY;
-        winX += dx;
-        winY += dy;
-        window.chatObject.moveWindow(winX, winY);
-    });
+    // Attach mousedown to drag regions + toolbar
+    const dragTargets = [
+        document.getElementById('sidebar-drag-region'),
+        document.getElementById('main-drag-region'),
+        document.getElementById('top-toolbar')
+    ].filter(Boolean);
 
-    document.addEventListener('mouseup', () => {
-        dragging = false;
+    dragTargets.forEach(el => {
+        el.addEventListener('mousedown', handleDragStart);
     });
 }
 
@@ -378,8 +387,8 @@ class CardHalftoneEngine {
     _renderFrame() {
         const { ctx, spacing, baseRadius, maxRadius, mouseRadius, mouseX, mouseY, w, h } = this;
         if (!ctx || w <= 0 || h <= 0) return;
-        const isLight = document.body.classList.contains('light-theme');
-        const baseAlpha = isLight ? 0.06 : 0.04;
+        const isLight = document.getElementById('main-content-wrapper')?.classList.contains('light-theme') || false;
+        const baseAlpha = isLight ? 0.12 : 0.08;
         const mr2 = mouseRadius * mouseRadius;
 
         ctx.clearRect(0, 0, w, h);
@@ -400,7 +409,7 @@ class CardHalftoneEngine {
 
         // Enhanced dots near mouse
         if (mouseX > -999) {
-            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.1)';
+            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.24)' : 'rgba(255,255,255,0.2)';
             ctx.beginPath();
             for (let x = spacing / 2; x < w; x += spacing) {
                 for (let y = spacing / 2; y < h; y += spacing) {
@@ -416,168 +425,6 @@ class CardHalftoneEngine {
             }
             ctx.fill();
         }
-    }
-}
-
-// ==================== TrainingChart ====================
-class TrainingChart {
-    constructor(canvas) {
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.activeTab = 'loss';
-        this.lossData = [];
-        this.lrData = [];
-        this.maxPoints = 100;
-        this._resize();
-        window.addEventListener('resize', () => { this._resize(); this.draw(); });
-    }
-
-    _resize() {
-        const dpr = window.devicePixelRatio || 1;
-        const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.canvas.width = rect.width * dpr;
-        this.canvas.height = rect.height * dpr;
-        this.canvas.style.width = rect.width + 'px';
-        this.canvas.style.height = rect.height + 'px';
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        this.w = rect.width;
-        this.h = rect.height;
-    }
-
-    addPoint(loss, lr) {
-        this.lossData.push(loss);
-        this.lrData.push(lr);
-        if (this.lossData.length > this.maxPoints) {
-            this.lossData.shift();
-            this.lrData.shift();
-        }
-        this.draw();
-    }
-
-    setTab(tab) {
-        this.activeTab = tab;
-        this.draw();
-    }
-
-    clear() {
-        this.lossData = [];
-        this.lrData = [];
-        this.draw();
-    }
-
-    draw() {
-        const { ctx, w, h } = this;
-        const pad = { top: 24, right: 20, bottom: 32, left: 56 };
-        const cw = w - pad.left - pad.right;
-        const ch = h - pad.top - pad.bottom;
-
-        ctx.clearRect(0, 0, w, h);
-
-        const data = this.activeTab === 'loss' ? this.lossData : this.lrData;
-        const label = this.activeTab === 'loss' ? 'Loss' : 'Learning Rate';
-        const color = this.activeTab === 'loss' ? '#ff5c5c' : '#3dd68c';
-
-        // Grid lines
-        const isLight = document.body.classList.contains('light-theme');
-        ctx.strokeStyle = isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)';
-        ctx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-            const y = pad.top + (ch / 4) * i;
-            ctx.beginPath();
-            ctx.moveTo(pad.left, y);
-            ctx.lineTo(pad.left + cw, y);
-            ctx.stroke();
-        }
-
-        if (data.length < 2) {
-            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)';
-            ctx.font = '13px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Waiting for data...', w / 2, h / 2);
-            return;
-        }
-
-        // Y-axis range
-        let minV = Infinity, maxV = -Infinity;
-        for (let i = 0; i < data.length; i++) {
-            if (data[i] < minV) minV = data[i];
-            if (data[i] > maxV) maxV = data[i];
-        }
-        const range = maxV - minV || 1;
-        minV -= range * 0.1;
-        maxV += range * 0.1;
-
-        // Y labels
-        ctx.fillStyle = isLight ? '#64748b' : '#888899';
-        ctx.font = '11px monospace';
-        ctx.textAlign = 'right';
-        for (let i = 0; i <= 4; i++) {
-            const val = maxV - ((maxV - minV) / 4) * i;
-            const y = pad.top + (ch / 4) * i;
-            ctx.fillText(val.toPrecision(4), pad.left - 8, y + 4);
-        }
-
-        // X labels
-        ctx.textAlign = 'center';
-        const startIdx = Math.max(0, data.length - this.maxPoints);
-        const step = Math.max(1, Math.floor(data.length / 5));
-        for (let i = 0; i < data.length; i += step) {
-            const x = pad.left + (i / (data.length - 1)) * cw;
-            ctx.fillText(String(startIdx + i + 1), x, h - 8);
-        }
-
-        // Area fill gradient
-        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch);
-        if (this.activeTab === 'loss') {
-            grad.addColorStop(0, 'rgba(255,92,92,0.15)');
-            grad.addColorStop(1, 'rgba(255,92,92,0)');
-        } else {
-            grad.addColorStop(0, 'rgba(61,214,140,0.15)');
-            grad.addColorStop(1, 'rgba(61,214,140,0)');
-        }
-
-        // Build points
-        const pts = [];
-        for (let i = 0; i < data.length; i++) {
-            const x = pad.left + (i / (data.length - 1)) * cw;
-            const y = pad.top + ch - ((data[i] - minV) / (maxV - minV)) * ch;
-            pts.push({ x, y });
-        }
-
-        // Area fill
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pad.top + ch);
-        ctx.lineTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) {
-            const prev = pts[i - 1], curr = pts[i];
-            const cpx = (prev.x + curr.x) / 2;
-            ctx.bezierCurveTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y);
-        }
-        ctx.lineTo(pts[pts.length - 1].x, pad.top + ch);
-        ctx.closePath();
-        ctx.fillStyle = grad;
-        ctx.fill();
-
-        // Line
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) {
-            const prev = pts[i - 1], curr = pts[i];
-            const cpx = (prev.x + curr.x) / 2;
-            ctx.bezierCurveTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y);
-        }
-        ctx.stroke();
-
-        // Latest value label
-        const lastVal = data[data.length - 1];
-        ctx.fillStyle = color;
-        ctx.font = 'bold 12px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${label}: ${lastVal.toPrecision(4)}`, pad.left + 8, pad.top + 14);
     }
 }
 
@@ -614,25 +461,56 @@ async function checkInferenceReady() {
             const info = await res.json();
             if (info.status === 'ready') {
                 capsuleText.textContent = `🟢 ${info.current_lora ? info.current_lora.split('/').pop() : 'Base Model'}`;
+                // ★ 标记推理后端已启动
+                isInferenceRunning = true;
                 return true;
+            }
+            // ★ 返回加载进度信息
+            if (info.load_progress) {
+                return { loading: true, progress: info.load_progress };
             }
         }
     } catch (e) {}
+    // ★ 如果请求失败，标记推理后端未运行
+    isInferenceRunning = false;
     return false;
 }
 
 async function ensureModelReady() {
-    if (await checkInferenceReady()) return true;
+    const initialCheck = await checkInferenceReady();
+    if (initialCheck === true) return true;
+
     isWakingUp = true;
     const dict = i18n[currentLang] || i18n['zh-CN'];
-    chatSendBtn.textContent = currentLang === 'en' ? 'Waking up...' : '唤醒中...';
     chatSendBtn.disabled = true;
     chatInput.disabled = true;
     window.chatObject?.startChat();
-    for (let i = 0; i < 60; i++) {
+
+    // ★ 显示加载进度，根据模型状态提供更明确的反馈
+    for (let i = 0; i < 300; i++) {
+        const checkResult = await checkInferenceReady();
+        if (checkResult === true) break;
+
+        // 优先使用 API 返回的加载进度
+        if (checkResult && checkResult.loading) {
+            const prog = checkResult.progress;
+            const pct = prog.progress || 0;
+            const msg = prog.message || '加载中...';
+            chatSendBtn.textContent = `${pct}% ${msg}`;
+        } else {
+            // 根据当前模型状态显示不同的提示
+            if (currentModelState === 'starting') {
+                chatSendBtn.textContent = currentLang === 'en' ? 'Starting backend...' : '启动后端...';
+            } else if (currentModelState === 'loading') {
+                chatSendBtn.textContent = currentLang === 'en' ? 'Loading model...' : '加载模型...';
+            } else {
+                chatSendBtn.textContent = currentLang === 'en' ? 'Connecting...' : '连接中...';
+            }
+        }
+
         await new Promise(r => setTimeout(r, 1000));
-        if (await checkInferenceReady()) break;
     }
+
     isWakingUp = false;
     chatInput.disabled = false;
     updateSendBtnState();
@@ -737,17 +615,18 @@ async function sendMessage(text) {
                             applyTemperatureHue(json.meta.temperature);
                         } else if (json.choices) {
                             let delta = json.choices[0].delta.content;
-                            if (delta.includes('')) {
+                            // ★ 检查思考标签（支持 <think> 和 </think>）
+                            if (delta.includes('<think>')) {
                                 isThinking = true;
                                 thinkBlock.style.display = 'block';
                                 thinkBlock.classList.add('open');
-                                delta = delta.replace('', '');
+                                delta = delta.replace('<think>', '');
                             }
-                            if (delta.includes('')) {
+                            if (delta.includes('</think>')) {
                                 isThinking = false;
                                 thinkTitle.textContent = currentLang === 'en' ? 'Thinking Process (click to collapse)' : '思考过程（点击折叠）';
                                 thinkBlock.classList.remove('open');
-                                delta = delta.replace('', '');
+                                delta = delta.replace('</think>', '');
                             }
                             if (isThinking) {
                                 thinkingText += delta;
@@ -845,9 +724,11 @@ if (newChatBtn) {
 }
 
 if (sidebarToggle && chatSidebar) {
+    const hamburgerSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>';
+    const closeSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     sidebarToggle.onclick = () => {
         chatSidebar.classList.toggle('collapsed');
-        sidebarToggle.textContent = chatSidebar.classList.contains('collapsed') ? '☰' : '✕';
+        sidebarToggle.innerHTML = chatSidebar.classList.contains('collapsed') ? hamburgerSVG : closeSVG;
     };
 }
 
@@ -911,9 +792,22 @@ if (loraCapsule) {
 }
 
 async function switchLoraViaCapsule(path) {
+    // ★ 并发保护：如果模型正在关闭或 LoRA 正在切换中，忽略操作
+    if (isModelClosing) {
+        showToast(`⚠️ ${currentLang === 'en' ? 'Please wait for model to close' : '请等待模型关闭完成'}`, 3000);
+        return;
+    }
+    if (isLoraSwitching) {
+        showToast(`⚠️ ${currentLang === 'en' ? 'LoRA switching in progress' : 'LoRA 切换进行中'}`, 3000);
+        return;
+    }
+    
     loraCapsule.classList.remove('open');
     if (!(await ensureModelReady())) return;
-    capsuleText.textContent = currentLang === 'en' ? '⏳ Switching...' : '⏳ 切换中...';
+    
+    isLoraSwitching = true;
+    capsuleText.textContent = currentLang === 'en' ? ' Switching...' : '⏳ 切换中...';
+    
     try {
         const res = await fetch(API_BASE + '/api/lora/switch', {
             method: 'POST',
@@ -921,13 +815,24 @@ async function switchLoraViaCapsule(path) {
             body: JSON.stringify({ lora_path: path })
         });
         if (res.status === 200) {
-            capsuleText.textContent = `🟢 ${path ? path.split('/').pop() : 'Base Model'}`;
+            const data = await res.json();
+            const loraName = path ? path.split('/').pop() : (currentLang === 'en' ? 'Base Model' : '基础模型');
+            capsuleText.textContent = ` ${loraName}`;
+            // ★ 显示更明显的成功提示（绿色背景，更长显示时间）
+            showToast(`✅ ${currentLang === 'en' ? `LoRA switched to: ${loraName}` : `已切换到 LoRA: ${loraName}`}`, 5000);
         } else {
-            showToast(currentLang === 'en' ? 'Switch failed' : '切换失败');
+            const errorData = await res.json().catch(() => ({}));
+            const errorMsg = errorData.error || (currentLang === 'en' ? 'Switch failed' : '切换失败');
+            capsuleText.textContent = `🔴 ${currentLang === 'en' ? 'Failed' : '失败'}`;
+            // ★ 显示更明显的失败提示（红色背景，更长显示时间）
+            showToast(`❌ ${errorMsg}`, 6000);
             checkInferenceReady();
         }
     } catch (e) {
-        showToast(currentLang === 'en' ? 'Connection failed' : '连接失败');
+        capsuleText.textContent = `🔴 ${currentLang === 'en' ? 'Error' : '错误'}`;
+        showToast(`❌ ${currentLang === 'en' ? 'Connection failed' : '连接失败'}: ${e.message}`, 6000);
+    } finally {
+        isLoraSwitching = false;
     }
 }
 
@@ -973,19 +878,85 @@ function handleFiles(files) {
         const reader = new FileReader();
         reader.onload = (e) => {
             let content = e.target.result;
+            let outputName = file.name;
+            
             if (file.name.endsWith('.txt')) {
-                const chunks = content.split(/\n\s*\n|(?<=[。！？])\s*/).filter(c => c.trim().length > 50);
-                content = chunks.map(c => {
-                    const splitIdx = Math.floor(c.length * 0.3);
-                    return JSON.stringify({
-                        messages: [
-                            { role: 'user', content: "Please continue: " + c.substring(0, splitIdx) },
-                            { role: 'assistant', content: c.substring(splitIdx) }
-                        ]
-                    });
-                }).join('\n');
+                // ★ TXT 文件：先尝试 JSON 解析，失败再按纯文本分块
+                let isJson = false;
+                try {
+                    const dataObj = JSON.parse(content);
+                    let items = [];
+                    if (typeof dataObj === 'object' && dataObj !== null && 'data' in dataObj && Array.isArray(dataObj.data)) {
+                        items = dataObj.data;
+                    } else if (Array.isArray(dataObj)) {
+                        items = dataObj;
+                    }
+                    if (items.length > 0) {
+                        content = items.map(item => {
+                            if (item.messages) return JSON.stringify(item);
+                            else if (item.instruction && item.output !== undefined) {
+                                const userContent = item.input ? `${item.instruction}\n\n${item.input}` : item.instruction;
+                                return JSON.stringify({ messages: [{ role: 'user', content: userContent }, { role: 'assistant', content: item.output }] });
+                            }
+                            return JSON.stringify(item);
+                        }).join('\n');
+                        isJson = true;
+                    }
+                } catch (_) {}
+                if (!isJson) {
+                    // 纯文本分块逻辑
+                    const chunks = content.split(/\n\s*\n|(?<=[。！？])\s*/).filter(c => c.trim().length > 50);
+                    content = chunks.map(c => {
+                        const splitIdx = Math.floor(c.length * 0.3);
+                        return JSON.stringify({
+                            messages: [
+                                { role: 'user', content: "Please continue: " + c.substring(0, splitIdx) },
+                                { role: 'assistant', content: c.substring(splitIdx) }
+                            ]
+                        });
+                    }).join('\n');
+                }
+                outputName = file.name.replace('.txt', '.jsonl');
+            } else if (file.name.endsWith('.json')) {
+                // ★ JSON 文件：检测格式并转换为 JSONL
+                try {
+                    const dataObj = JSON.parse(content);
+                    let items = [];
+                    
+                    if (typeof dataObj === 'object' && dataObj !== null && 'data' in dataObj && Array.isArray(dataObj.data)) {
+                        // 格式：{"system": "...", "data": [...]}
+                        items = dataObj.data;
+                    } else if (Array.isArray(dataObj)) {
+                        // 格式：[{...}, {...}]
+                        items = dataObj;
+                    }
+                    
+                    // 将每个 item 转换为标准的 messages 格式
+                    content = items.map(item => {
+                        if (item.messages) {
+                            // 已经是标准格式
+                            return JSON.stringify(item);
+                        } else if (item.instruction && item.output !== undefined) {
+                            // 指令格式：{instruction, input, output}
+                            const userContent = item.input ? `${item.instruction}\n\n${item.input}` : item.instruction;
+                            return JSON.stringify({
+                                messages: [
+                                    { role: 'user', content: userContent },
+                                    { role: 'assistant', content: item.output }
+                                ]
+                            });
+                        }
+                        return JSON.stringify(item);
+                    }).join('\n');
+                    
+                    outputName = file.name.replace('.json', '.jsonl');
+                } catch (err) {
+                    // JSON 解析失败，保持原样
+                    console.warn('JSON parse failed, keeping as-is:', err);
+                }
             }
-            window.chatObject?.saveDataset(file.name.replace('.txt', '.jsonl'), content);
+            
+            window.chatObject?.saveDataset(outputName, content);
         };
         reader.readAsText(file, 'UTF-8');
     });
@@ -1105,8 +1076,15 @@ function initLogToggles() {
 
 // ==================== Training ====================
 trainModeRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-        if (baseLoraGroup) baseLoraGroup.style.display = e.target.value === 'continue' ? 'block' : 'none';
+    radio.addEventListener('change', () => {
+        // ★ 更新所有 radio-card 的 active 类
+        document.querySelectorAll('.radio-card').forEach(card => {
+            const input = card.querySelector('input[type="radio"]');
+            card.classList.toggle('active', input && input.checked);
+        });
+        // 增量训练时显示基础 LoRA 选择
+        const checked = document.querySelector('input[name="train-mode"]:checked');
+        if (baseLoraGroup) baseLoraGroup.style.display = checked && checked.value === 'continue' ? 'block' : 'none';
     });
 });
 
@@ -1178,10 +1156,48 @@ document.getElementById('train-btn')?.addEventListener('click', () => {
     const loraAlpha = document.getElementById('loraalpha-input')?.value || '32';
 
     appendLog('train', `${currentLang === 'en' ? 'Starting training' : '开始训练'}: ${loraName} (${mode})`);
-    if (window._trainChart) window._trainChart.clear();
+
+    // Initialize sidebar training state
+    sidebarTrainState.status = 'running';
+    sidebarTrainState.loraName = loraName;
+    sidebarTrainState.mode = mode === 'new' ? (currentLang === 'en' ? 'New' : '全新') : (currentLang === 'en' ? 'Continue' : '增量');
+    sidebarTrainState.epoch = 0;
+    sidebarTrainState.totalEpochs = parseInt(epochs) || 0;
+    sidebarTrainState.step = 0;
+    sidebarTrainState.totalSteps = 0;
+    sidebarTrainState.loss = null;
+    sidebarTrainState.lr = null;
+    sidebarTrainState.lossHistory = [];  // ★ 清空历史数据
+    sidebarTrainState.lrHistory = [];    // ★ 清空历史数据
+    sidebarTrainState.startTime = Date.now();
+    sidebarTrainState.logs = [];
+    renderSidebarBody();
+    startSidebarTimer();
 
     if (window.chatObject) {
-        window.chatObject.startTrain(loraName, datasetPath, mode, baseLora, lr, epochs, seqLen, batchSize, optimizer, weightDecay, loraR, loraAlpha);
+        if (typeof window.chatObject.startTrain === 'function') {
+            appendLog('train', `[JS] 调用 startTrain (JSON模式)...`);
+            const trainConfig = JSON.stringify({
+                lora_name: loraName,
+                dataset_path: datasetPath,
+                mode: mode,
+                base_lora: baseLora,
+                lr: lr,
+                epochs: epochs,
+                seq_len: seqLen,
+                batch_size: batchSize,
+                optimizer: optimizer,
+                weight_decay: weightDecay,
+                lora_r: loraR,
+                lora_alpha: loraAlpha
+            });
+            window.chatObject.startTrain(trainConfig);
+            appendLog('train', `[JS] startTrain 调用完成`);
+        } else {
+            appendLog('train', `[JS] startTrain 不是函数!`);
+        }
+    } else {
+        appendLog('train', `[JS] window.chatObject 不存在!`);
     }
 });
 
@@ -1199,25 +1215,18 @@ if (languageSelect) {
     });
 }
 
-// ==================== Chart Tab Switching ====================
-document.querySelectorAll('.chart-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        if (window._trainChart) {
-            window._trainChart.setTab(tab.dataset.chart);
-        }
-    });
-});
-
 // ==================== Python Signal Handlers ====================
 function connectSignals() {
     const obj = window.chatObject;
     if (!obj) return;
 
     obj.envLog.connect((msg) => appendLog('env', msg));
+    obj.modelLog.connect((msg) => addSidebarLog(msg));  // Model logs go to sidebar, NOT env log
     obj.downloadLog.connect((msg) => appendLog('download', msg));
-    obj.trainLog.connect((msg) => appendLog('train', msg));
+    obj.trainLog.connect((msg) => {
+        appendLog('train', msg);
+        addSidebarLog(msg);
+    });
 
     obj.dataLoaded.connect((data) => {
         try {
@@ -1241,6 +1250,30 @@ function connectSignals() {
         // No longer used for wizard; GPU info is shown in settings if needed
     });
 
+    obj.gpuStats.connect((jsonStr) => {
+        try {
+            sidebarGpuStats = JSON.parse(jsonStr);
+            renderSidebarBody();
+        } catch (e) {}
+    });
+
+    obj.modelState.connect((state) => {
+        // Update model state in sidebar: starting|loading|running|closed
+        currentModelState = state;
+        if (state === 'starting' || state === 'loading') {
+            isInferenceRunning = true;
+            renderSidebarBody();
+        } else if (state === 'running') {
+            isInferenceRunning = true;
+            isModelClosing = false; // Reset closing flag when backend is running
+            renderSidebarBody();
+        } else if (state === 'closed') {
+            isInferenceRunning = false;
+            isModelClosing = false; // Reset closing flag
+            renderSidebarBody();
+        }
+    });
+
     obj.envDone.connect((success) => {
         appendLog('env', success ? (currentLang === 'en' ? 'Environment check complete' : '环境检测完成') : (currentLang === 'en' ? 'Environment check failed' : '环境检测失败'));
     });
@@ -1252,14 +1285,31 @@ function connectSignals() {
     obj.trainMetrics.connect((jsonStr) => {
         try {
             const m = JSON.parse(jsonStr);
-            if (window._trainChart && m.loss !== undefined) {
-                window._trainChart.addPoint(m.loss, m.lr || 0);
+            // Update sidebar training state
+            if (m.loss !== undefined) {
+                sidebarTrainState.loss = m.loss;
+                sidebarTrainState.lossHistory.push(m.loss);
             }
+            if (m.lr !== undefined) {
+                sidebarTrainState.lr = m.lr;
+                sidebarTrainState.lrHistory.push(m.lr);
+            }
+            if (m.epoch !== undefined) sidebarTrainState.epoch = m.epoch;
+            if (m.step !== undefined) sidebarTrainState.step = m.step;
+            if (m.total_steps !== undefined) sidebarTrainState.totalSteps = m.total_steps;
+            renderSidebarBody();
         } catch (e) {}
     });
 
     obj.trainDone.connect((success) => {
         appendLog('train', success ? (currentLang === 'en' ? 'Training complete!' : '训练完成！') : (currentLang === 'en' ? 'Training failed' : '训练失败'));
+        // Update sidebar state
+        sidebarTrainState.status = success ? 'complete' : 'error';
+        if (sidebarTimerInterval) { clearInterval(sidebarTimerInterval); sidebarTimerInterval = null; }
+        addSidebarLog(success ? (currentLang === 'en' ? 'Training complete!' : '训练完成！') : (currentLang === 'en' ? 'Training failed' : '训练失败'));
+        // ★ Clear startTime to stop elapsed time counter
+        sidebarTrainState.startTime = null;
+        renderSidebarBody();
     });
 
     obj.datasetContent.connect((content) => {
@@ -1294,6 +1344,287 @@ function connectSignals() {
     });
 }
 
+// ==================== Sidebar Training Progress Panel ====================
+let sidebarTrainState = {
+    status: 'idle', // idle | running | complete | error
+    loraName: '',
+    mode: '',
+    epoch: 0,
+    totalEpochs: 0,
+    step: 0,
+    totalSteps: 0,
+    loss: null,
+    lr: null,
+    lossHistory: [],  // ★ 历史loss数据用于绘图
+    lrHistory: [],    // ★ 历史LR数据用于绘图
+    startTime: null,
+    logs: []
+};
+
+// ★ 推理后端状态（用于决定是否显示"关闭模型"按钮）
+let isInferenceRunning = false;
+let currentModelState = 'closed'; // closed|starting|loading|running
+
+// ★ 并发操作保护：防止在模型关闭过程中进行其他操作
+let isModelClosing = false; // 模型正在关闭中
+let isLoraSwitching = false; // LoRA 正在切换中
+
+// ==================== Simple Line Chart Drawing ====================
+function drawLineChart(canvasId, data, color, label) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !data || data.length === 0) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = 20;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    // Find min/max for scaling
+    const minVal = Math.min(...data);
+    const maxVal = Math.max(...data);
+    const range = maxVal - minVal || 1;
+    
+    // Draw grid lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = padding + (height - 2 * padding) * i / 4;
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(width - padding, y);
+        ctx.stroke();
+    }
+    
+    // Draw the line
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    
+    data.forEach((val, i) => {
+        const x = padding + (width - 2 * padding) * i / (data.length - 1 || 1);
+        const y = padding + (height - 2 * padding) * (1 - (val - minVal) / range);
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    ctx.stroke();
+    
+    // Fill area under line
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = color;
+    ctx.lineTo(padding + (width - 2 * padding), height - padding);
+    ctx.lineTo(padding, height - padding);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+}
+
+function renderSidebarBody() {
+    const body = document.querySelector('.sidebar-body');
+    if (!body) return;
+
+    const isTraining = sidebarTrainState.status === 'running';
+    const isComplete = sidebarTrainState.status === 'complete';
+    const isError = sidebarTrainState.status === 'error';
+    const isIdle = sidebarTrainState.status === 'idle';
+
+    const statusClass = isTraining ? 'running' : isError ? 'error' : 'idle';
+    const statusText = isTraining ? (currentLang === 'en' ? 'Running' : '训练中')
+        : isComplete ? (currentLang === 'en' ? 'Complete' : '已完成')
+        : isError ? (currentLang === 'en' ? 'Error' : '错误')
+        : (currentLang === 'en' ? 'Idle' : '空闲');
+
+    const progressPct = sidebarTrainState.totalSteps > 0
+        ? Math.round((sidebarTrainState.step / sidebarTrainState.totalSteps) * 100)
+        : (isComplete ? 100 : 0);
+
+    const elapsed = sidebarTrainState.startTime
+        ? Math.floor((Date.now() - sidebarTrainState.startTime) / 1000)
+        : 0;
+    const elapsedStr = formatTime(elapsed);
+    const etaStr = (isTraining && progressPct > 0)
+        ? formatTime(Math.round(elapsed * (100 / progressPct - 1)))
+        : '--:--:--';
+
+    // ★ Model state display
+    const modelStatusText = isInferenceRunning 
+        ? (currentLang === 'en' ? '🟢 Running' : '🟢 运行中')
+        : isModelClosing
+        ? (currentLang === 'en' ? '⏳ Closing...' : '⏳ 关闭中...')
+        : (currentLang === 'en' ? '🔴 Closed' : '🔴 已关闭');
+    const modelStatusClass = isInferenceRunning ? 'running' : isModelClosing ? '' : 'idle';
+
+    body.innerHTML = `
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">${currentLang === 'en' ? 'Model Status' : '模型状态'}</div>
+            <div class="sidebar-status-card">
+                <div class="sidebar-status-row">
+                    <span class="sidebar-status-label">${currentLang === 'en' ? 'Status' : '状态'}</span>
+                    <span class="sidebar-status-value ${modelStatusClass}">${modelStatusText}</span>
+                </div>
+                ${(isInferenceRunning || isModelClosing) ? `
+                <button id="close-model-btn" class="sidebar-close-btn ${isModelClosing ? 'disabled' : ''}" style="margin-top:12px;width:100%;" ${isModelClosing ? 'disabled' : ''}>
+                    ${isModelClosing ? (currentLang === 'en' ? '⏳ Closing...' : '⏳ 关闭中...') : (currentLang === 'en' ? ' Close Model' : '🔴 关闭模型')}
+                </button>
+                ` : ''}
+            </div>
+        </div>
+        ${(isTraining || isComplete) ? `
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">${currentLang === 'en' ? 'Training Status' : '训练状态'}</div>
+            <div class="sidebar-status-card">
+                <div class="sidebar-status-row">
+                    <span class="sidebar-status-label">${currentLang === 'en' ? 'Status' : '状态'}</span>
+                    <span class="sidebar-status-value ${statusClass}">${statusText}</span>
+                </div>
+                ${!isIdle ? `
+                <div class="sidebar-status-row">
+                    <span class="sidebar-status-label">${currentLang === 'en' ? 'LoRA' : '名称'}</span>
+                    <span class="sidebar-status-value">${sidebarTrainState.loraName || '--'}</span>
+                </div>
+                <div class="sidebar-status-row">
+                    <span class="sidebar-status-label">${currentLang === 'en' ? 'Mode' : '模式'}</span>
+                    <span class="sidebar-status-value">${sidebarTrainState.mode || '--'}</span>
+                </div>
+                <div class="sidebar-status-row">
+                    <span class="sidebar-status-label">${currentLang === 'en' ? 'Epoch' : '轮次'}</span>
+                    <span class="sidebar-status-value">${sidebarTrainState.epoch}/${sidebarTrainState.totalEpochs || '?'}</span>
+                </div>
+                ` : ''}
+                ${isTraining || isComplete ? `
+                <div class="sidebar-progress-bar">
+                    <div class="sidebar-progress-fill ${isComplete ? 'complete' : ''}" style="width:${progressPct}%"></div>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">${currentLang === 'en' ? 'Metrics' : '实时指标'}</div>
+            <div class="sidebar-metrics-grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="sidebar-metric-item" style="display: flex; flex-direction: column; align-items: center;">
+                    <canvas id="loss-chart" width="180" height="80" style="width: 100%; height: 80px; background: rgba(0,0,0,0.2); border-radius: 6px;"></canvas>
+                    <div class="sidebar-metric-label" style="margin-top: 4px;">Loss ${sidebarTrainState.loss !== null ? sidebarTrainState.loss.toFixed(4) : '--'}</div>
+                </div>
+                <div class="sidebar-metric-item" style="display: flex; flex-direction: column; align-items: center;">
+                    <canvas id="lr-chart" width="180" height="80" style="width: 100%; height: 80px; background: rgba(0,0,0,0.2); border-radius: 6px;"></canvas>
+                    <div class="sidebar-metric-label" style="margin-top: 4px;">LR ${sidebarTrainState.lr !== null ? sidebarTrainState.lr.toExponential(2) : '--'}</div>
+                </div>
+                <div class="sidebar-metric-item">
+                    <div class="sidebar-metric-value">${elapsedStr}</div>
+                    <div class="sidebar-metric-label">${currentLang === 'en' ? 'Elapsed' : '已用时间'}</div>
+                </div>
+                <div class="sidebar-metric-item">
+                    <div class="sidebar-metric-value">${etaStr}</div>
+                    <div class="sidebar-metric-label">ETA</div>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">${currentLang === 'en' ? 'Live Feed' : '实时反馈'}</div>
+            <div class="sidebar-live-log" id="sidebar-log">
+                ${sidebarTrainState.logs.length === 0 && !isInferenceRunning
+                    ? `<div class="sidebar-empty-state">${currentLang === 'en' ? 'No activity yet' : '暂无活动'}</div>`
+                    : sidebarTrainState.logs.slice(-20).map(l => `<p>${l}</p>`).join('')}
+            </div>
+        </div>
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">${currentLang === 'en' ? 'GPU Monitor' : '显卡监控'}</div>
+            ${sidebarGpuStats.length === 0
+                ? `<div class="sidebar-status-card"><div class="sidebar-empty-state">${currentLang === 'en' ? 'No GPU detected' : '未检测到显卡'}</div></div>`
+                : sidebarGpuStats.map((gpu, i) => `
+                    <div class="sidebar-status-card" style="margin-bottom:8px;">
+                        <div class="sidebar-status-row">
+                            <span class="sidebar-status-label">GPU ${i}</span>
+                            <span class="sidebar-status-value ${gpu.util > 90 ? 'running' : gpu.util > 70 ? '' : 'idle'}">${gpu.util}%</span>
+                        </div>
+                        <div class="sidebar-progress-bar">
+                            <div class="sidebar-progress-fill" style="width:${gpu.util}%"></div>
+                        </div>
+                        <div class="sidebar-metrics-grid" style="margin-top:8px;">
+                            <div class="sidebar-metric-item">
+                                <div class="sidebar-metric-value">${gpu.mem_used}MB</div>
+                                <div class="sidebar-metric-label">${currentLang === 'en' ? 'VRAM Used' : '显存已用'}</div>
+                            </div>
+                            <div class="sidebar-metric-item">
+                                <div class="sidebar-metric-value">${gpu.mem_total}MB</div>
+                                <div class="sidebar-metric-label">${currentLang === 'en' ? 'VRAM Total' : '显存总量'}</div>
+                            </div>
+                        </div>
+                        <div class="sidebar-status-row" style="margin-top:4px;">
+                            <span class="sidebar-status-label">${currentLang === 'en' ? 'Temperature' : '温度'}</span>
+                            <span class="sidebar-status-value ${gpu.temp > 85 ? 'error' : gpu.temp > 70 ? '' : 'idle'}">${gpu.temp}°C</span>
+                        </div>
+                    </div>
+                `).join('')}
+        </div>
+    `;
+
+    // ★ 绘制 Loss 和 LR 曲线图
+    setTimeout(() => {
+        drawLineChart('loss-chart', sidebarTrainState.lossHistory, '#ff6b6b', 'Loss');
+        drawLineChart('lr-chart', sidebarTrainState.lrHistory, '#4ecdc4', 'LR');
+    }, 0);
+
+    // Auto-scroll live log
+    const logEl = document.getElementById('sidebar-log');
+    if (logEl) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function formatTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function addSidebarLog(msg) {
+    const time = new Date().toLocaleTimeString();
+    sidebarTrainState.logs.push(`[${time}] ${msg}`);
+    if (sidebarTrainState.logs.length > 100) sidebarTrainState.logs.shift();
+    // Update just the log section if possible (avoid full re-render)
+    const logEl = document.getElementById('sidebar-log');
+    if (logEl) {
+        const emptyState = logEl.querySelector('.sidebar-empty-state');
+        if (emptyState) emptyState.remove();
+        const p = document.createElement('p');
+        p.textContent = `[${time}] ${msg}`;
+        logEl.appendChild(p);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+}
+
+// Update sidebar timer every second during training
+let sidebarTimerInterval = null;
+function startSidebarTimer() {
+    if (sidebarTimerInterval) clearInterval(sidebarTimerInterval);
+    sidebarTimerInterval = setInterval(() => {
+        if (sidebarTrainState.status === 'running') {
+            // Update elapsed/ETA without full re-render
+            const metricValues = document.querySelectorAll('.sidebar-metric-value');
+            if (metricValues.length >= 4) {
+                const elapsed = Math.floor((Date.now() - sidebarTrainState.startTime) / 1000);
+                metricValues[2].textContent = formatTime(elapsed);
+                const progressPct = sidebarTrainState.totalSteps > 0
+                    ? Math.round((sidebarTrainState.step / sidebarTrainState.totalSteps) * 100) : 0;
+                metricValues[3].textContent = progressPct > 0
+                    ? formatTime(Math.round(elapsed * (100 / progressPct - 1)))
+                    : '--:--:--';
+            }
+        } else {
+            clearInterval(sidebarTimerInterval);
+            sidebarTimerInterval = null;
+        }
+    }, 1000);
+}
+
 // ==================== Initialization ====================
 function init() {
     // Per-card halftone engines
@@ -1303,17 +1634,33 @@ function init() {
         window._halftoneInstances.push(engine);
     });
 
-    // Training chart
-    const chartCanvas = document.getElementById('train-chart');
-    if (chartCanvas) {
-        window._trainChart = new TrainingChart(chartCanvas);
-        window._trainChart.draw();
-    }
-
     // Navigation
     navBtns.forEach(btn => {
         btn.addEventListener('click', () => switchPage(btn.dataset.page));
     });
+
+    // Tutorial button — show tutorial page
+    const actionTutorial = document.getElementById('action-tutorial');
+    if (actionTutorial) actionTutorial.addEventListener('click', () => {
+        document.querySelectorAll('.page-container').forEach(p => p.classList.remove('active'));
+        const tutEl = document.getElementById('tutorial-content');
+        if (tutEl) tutEl.classList.add('active');
+        navBtns.forEach(d => d.classList.remove('active'));
+    });
+    // Tutorial back button — return to chat
+    const tutorialBackBtn = document.getElementById('tutorial-back-btn');
+    if (tutorialBackBtn) tutorialBackBtn.addEventListener('click', () => {
+        switchPage('chat');
+    });
+
+    // Sidebar collapse/expand toggle — controlled by toolbar button only
+    function toggleGlassSidebar() {
+        const sidebar = document.getElementById('glass-sidebar');
+        if (!sidebar) return;
+        sidebar.classList.toggle('collapsed');
+    }
+    const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+    if (sidebarToggleBtn) sidebarToggleBtn.addEventListener('click', toggleGlassSidebar);
 
     // Window controls
     initWindowControls();
@@ -1323,10 +1670,41 @@ function init() {
     initLogToggles();
 
     // Apply initial theme
-    applyTheme('train');
+    applyTheme('chat');
 
     // Drop zone
     initDropZone();
+
+    // Render sidebar training progress (initial idle state)
+    renderSidebarBody();
+
+    // Attach close model button handler (called after renderSidebarBody)
+    function attachCloseModelHandler() {
+        const closeModelBtn = document.getElementById('close-model-btn');
+        if (closeModelBtn) {
+            closeModelBtn.onclick = () => {
+                // ★ 并发保护：如果已经在关闭中，忽略点击
+                if (isModelClosing) return;
+                
+                isModelClosing = true;
+                renderSidebarBody(); // 重新渲染以显示"关闭中..."状态
+                
+                if (window.chatObject) {
+                    window.chatObject.stopInference();
+                    showToast(currentLang === 'en' ? 'Closing model...' : '正在关闭模型...');
+                    
+                    // Note: Don't set isInferenceRunning = false here
+                    // Wait for modelState signal to emit 'closed'
+                } else {
+                    isModelClosing = false;
+                    currentModelState = 'closed';
+                    renderSidebarBody();
+                    attachCloseModelHandler(); // Re-attach for next time
+                }
+            };
+        }
+    }
+    attachCloseModelHandler();
 
     // Connect Python signals
     connectSignals();
@@ -1338,6 +1716,7 @@ function init() {
         window.chatObject.getDatasetList();
         window.chatObject.getLoraWeights();
         window.chatObject.loadLanguage();
+        window.chatObject.startGpuMonitor();
     }
 }
 

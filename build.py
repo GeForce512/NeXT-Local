@@ -3,6 +3,14 @@
 import shutil, subprocess, sys, os, urllib.request, zipfile, ssl
 from pathlib import Path
 
+# ★ 强制 UTF-8 输出，防止 Windows GBK 控制台崩溃
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 ROOT = Path(__file__).parent.absolute()
 DIST = ROOT / 'dist'
 EXE_NAME = 'NeXT'
@@ -108,7 +116,9 @@ def build():
     exe_folder = DIST / EXE_NAME
     sep = ';' if os.name == 'nt' else ':'
 
-    print("\n🚀 [1/3] 打包主程序 (NeXT.exe)...")
+    print("\n [1/3] 打包主程序 (NeXT.exe)...")
+    # ★ PyInstaller --clean 会删除 build/ 但不会删除 dist/<name>/，需要手动确保为空
+    if exe_folder.exists(): shutil.rmtree(exe_folder)
     cmd_main = [sys.executable, '-m', 'PyInstaller', '--windowed', f'--name={EXE_NAME}',
                 f'--add-data=前端{sep}前端', '--clean', '--distpath', str(DIST), '主程序入口.py']
     if ICON_FILE.exists(): cmd_main.insert(3, f'--icon={ICON_FILE}')
@@ -120,10 +130,16 @@ def build():
     deploy_embedded_python(exe_folder)
 
     # 复制环境配置脚本
-    env_script = ROOT / '环境.py'
+    env_script = ROOT / 'env_setup.py'
     if env_script.exists():
         shutil.copy2(env_script, exe_folder / 'env_setup.py')
-        print("  ✔ 环境.py 已重命名为 env_setup.py 并复制")
+        print("  ✔ env_setup.py 已复制")
+    else:
+        # 兼容旧文件名
+        old_env = ROOT / '环境.py'
+        if old_env.exists():
+            shutil.copy2(old_env, exe_folder / 'env_setup.py')
+            print("  ✔ 环境.py 已重命名为 env_setup.py 并复制")
 
     # 复制批量下载脚本
     batch_dl_script = ROOT / '模型下载.py'
@@ -167,6 +183,39 @@ def build():
     build_dir = ROOT / 'build'
     if build_dir.exists(): shutil.rmtree(build_dir)
     for spec in ROOT.glob('*.spec'): spec.unlink()
+
+    # Auto-deploy to F:\NeXT (full copy including _internal)
+    deploy_target = Path('F:/NeXT')
+    if deploy_target.exists():
+        import time
+        for attempt in range(3):
+            try:
+                shutil.rmtree(deploy_target)
+                break
+            except PermissionError as e:
+                if attempt < 2:
+                    print(f"  ⚠️  删除旧部署失败 ({e}), 等待 2 秒后重试...")
+                    time.sleep(2)
+                else:
+                    # Fallback: use robocopy to overwrite instead of delete+copy
+                    print(f"  ⚠️  无法删除旧部署，使用增量更新模式...")
+                    # robocopy /E /Y /IS = copy all files, overwrite existing, include same files
+                    result = subprocess.run(
+                        ['robocopy', str(exe_folder), str(deploy_target), '/E', '/Y', '/IS'],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        print(f"\n  Deployed to {deploy_target} (incremental update)")
+                        print(f"\nDone! Output: {exe_folder}")
+                        print(f"\n🎉 打包完美完成！输出文件夹: {exe_folder}")
+                        return
+                    else:
+                        print(f"  ❌ robocopy 失败: {result.stderr}")
+                        raise
+    shutil.copytree(exe_folder, deploy_target)
+    print(f"\n  Deployed to {deploy_target} (with _internal)")
+
+    print(f"\nDone! Output: {exe_folder}")
 
     print(f"\n🎉 打包完美完成！输出文件夹: {exe_folder}")
 

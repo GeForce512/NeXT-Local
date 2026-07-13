@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, subprocess, json, time, shutil, requests, site, threading
+import sys, os, subprocess, json, time, shutil, requests, site, threading, ctypes, base64, tempfile
 from pathlib import Path
 from PyQt5.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QThread, QTimer
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog
@@ -76,7 +76,8 @@ class EnvCheckWorker(QThread):
                 process = subprocess.Popen(
                     [python_exe, '-u', env_script],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                    text=True, encoding='utf-8', errors='ignore', cwd=base_dir, env=env_vars
+                    text=True, encoding='utf-8', errors='ignore', cwd=base_dir, env=env_vars,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 for line in process.stdout:
                     if line.strip(): self.log.emit(line.strip())
@@ -110,11 +111,19 @@ except Exception as e:
         try:
             env_vars = os.environ.copy()
             env_vars['PYTHONIOENCODING'] = 'utf-8'
-            process = subprocess.Popen([python_exe, '-u', '-c', verify_script], stdout=subprocess.PIPE,
+            verify_path = os.path.join(tempfile.gettempdir(), '_next_verify_gpu.py')
+            with open(verify_path, 'w', encoding='utf-8') as f:
+                f.write(verify_script)
+            process = subprocess.Popen([python_exe, '-u', verify_path], stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore',
-                                       cwd=base_dir, env=env_vars)
+                                       cwd=base_dir, env=env_vars,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
             for line in process.stdout:
                 if line.strip(): self.log.emit(line.strip())
+            try:
+                os.remove(verify_path)
+            except Exception:
+                pass
             self.log.emit('🎉 系统已完全就绪。')
         except Exception as e:
             self.log.emit(f'❌ 验证异常: {str(e)}')
@@ -180,13 +189,19 @@ print(f"❌ [{{alias}}] 所有重试均失败！", flush=True)
 sys.exit(1)
 """
         try:
+            # ★ 写入临时文件执行（Windows cmd.exe 下 -c 多行脚本会因引号被吞而静默失败）
+            dl_script_path = os.path.join(tempfile.gettempdir(), '_next_download_runner.py')
+            with open(dl_script_path, 'w', encoding='utf-8') as f:
+                f.write(dl_script)
+
             env_vars = os.environ.copy()
             env_vars['PYTHONIOENCODING'] = 'utf-8'
             process = subprocess.Popen(
-                [python_exe, '-u', '-c', dl_script],
+                [python_exe, '-u', dl_script_path],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, text=True, encoding='utf-8',
-                errors='ignore', cwd=self.base_dir, env=env_vars
+                errors='ignore', cwd=self.base_dir, env=env_vars,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
 
             for line in process.stdout:
@@ -194,6 +209,11 @@ sys.exit(1)
                 if line: self.log.emit(line)
 
             process.wait()
+            # 清理临时脚本
+            try:
+                os.remove(dl_script_path)
+            except Exception:
+                pass
             if process.returncode == 0:
                 self.finished_signal.emit(True, self.alias)
             else:
@@ -225,17 +245,27 @@ class TrainWorker(QThread):
 
             # 在子进程中运行训练以避免阻塞 UI
             python_exe = get_python_exe()
-            # 构建训练启动脚本
-            config_json = json.dumps(self.config, ensure_ascii=False)
+            # ★ 使用 base64 传递配置，避免引号/特殊字符转义问题
+            config_b64 = base64.b64encode(json.dumps(self.config, ensure_ascii=False).encode('utf-8')).decode('ascii')
             runner = f"""
-import sys, os, json
+import sys, os, json, base64
+# ★ 强制 UTF-8 输出
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 sys.path.insert(0, r'{self.base_dir}')
 from 训练 import run_training
 
-config = json.loads(r'''{config_json}''')
+config = json.loads(base64.b64decode('{config_b64}').decode('utf-8'))
 
 def log_fn(msg):
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        print(str(msg).encode('utf-8', errors='replace').decode('utf-8', errors='replace'), flush=True)
 
 def metrics_fn(msg):
     print(msg, flush=True)
@@ -246,14 +276,34 @@ if result is True:
 else:
     print("__TRAIN_FAIL__", flush=True)
 """
+            # ★ 写入临时文件执行（Windows cmd.exe 下 -c 多行脚本会因引号被吞而静默失败）
+            runner_path = os.path.join(tempfile.gettempdir(), '_next_train_runner.py')
+            self.log.emit(f'🔍 [DEBUG] 临时脚本路径: {runner_path}')
+            try:
+                with open(runner_path, 'w', encoding='utf-8') as f:
+                    f.write(runner)
+                self.log.emit(f'🔍 [DEBUG] 临时脚本写入成功，大小: {os.path.getsize(runner_path)} bytes')
+            except Exception as e:
+                self.log.emit(f'❌ [DEBUG] 临时脚本写入失败: {e}')
+                self.finished_signal.emit(False)
+                return
+
             env_vars = os.environ.copy()
             env_vars['PYTHONIOENCODING'] = 'utf-8'
-            process = subprocess.Popen(
-                [python_exe, '-u', '-c', runner],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, text=True, encoding='utf-8',
-                errors='ignore', cwd=self.base_dir, env=env_vars
-            )
+            self.log.emit(f'🔍 [DEBUG] 启动子进程: {python_exe} -u {runner_path}')
+            try:
+                process = subprocess.Popen(
+                    [python_exe, '-u', runner_path],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, text=True, encoding='utf-8',
+                    errors='ignore', cwd=self.base_dir, env=env_vars,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                self.log.emit(f'🔍 [DEBUG] 子进程已启动，PID: {process.pid}')
+            except Exception as e:
+                self.log.emit(f'❌ [DEBUG] 子进程启动失败: {e}')
+                self.finished_signal.emit(False)
+                return
 
             success = False
             for line in process.stdout:
@@ -273,6 +323,11 @@ else:
                     self.log.emit(line)
 
             process.wait()
+            # 清理临时脚本
+            try:
+                os.remove(runner_path)
+            except Exception:
+                pass
             self.finished_signal.emit(success)
         except Exception as e:
             self.log.emit(f'❌ 训练异常: {str(e)}')
@@ -283,6 +338,7 @@ else:
 class ChatHandler(QObject):
     # ★ 前端期望的信号名称
     envLog = pyqtSignal(str)
+    modelLog = pyqtSignal(str)        # 模型启动/关闭日志（不显示在设置检测日志中）
     downloadLog = pyqtSignal(str)
     trainLog = pyqtSignal(str)
     dataLoaded = pyqtSignal(str)        # JSON: {type:'datasets'|'loras', data:[...]}
@@ -297,6 +353,8 @@ class ChatHandler(QObject):
     languageLoaded = pyqtSignal(str)      # 语言加载完成 (zh-CN / en)
     fileDialogResult = pyqtSignal(str)     # 文件选择结果 JSON: {files: [...]}
     windowStateChanged = pyqtSignal(bool)  # 窗口最大化状态变化
+    gpuStats = pyqtSignal(str)             # GPU 实时监控数据 JSON
+    modelState = pyqtSignal(str)           # 模型状态: starting|running|closed
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -304,6 +362,53 @@ class ChatHandler(QObject):
         self.env_worker = None
         self.dl_worker = None
         self.train_worker = None
+        self._gpu_running = False
+        self._gpu_thread = None
+
+    # ---------- GPU 实时监控 ----------
+    @pyqtSlot()
+    def startGpuMonitor(self):
+        """启动 GPU 监控后台线程"""
+        if hasattr(self, '_gpu_thread') and self._gpu_thread and self._gpu_thread.is_alive():
+            return
+        self._gpu_running = True
+        self._gpu_thread = threading.Thread(target=self._gpu_monitor_loop, daemon=True)
+        self._gpu_thread.start()
+
+    def _gpu_monitor_loop(self):
+        """每 3 秒轮询 nvidia-smi 获取 GPU 状态"""
+        while self._gpu_running:
+            try:
+                self._poll_gpu_stats()
+            except Exception:
+                pass
+            time.sleep(3)
+
+    def _poll_gpu_stats(self):
+        """调用 nvidia-smi 获取 GPU 利用率、显存、温度"""
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu',
+             '--format=csv,noheader,nounits'],
+            capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            gpus = []
+            for line in lines:
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 4:
+                    try:
+                        gpus.append({
+                            'util': int(parts[0]),
+                            'mem_used': int(parts[1]),
+                            'mem_total': int(parts[2]),
+                            'temp': int(parts[3])
+                        })
+                    except ValueError:
+                        continue
+            if gpus:
+                self.gpuStats.emit(json.dumps(gpus))
 
     # ---------- 首次启动检测 ----------
     @pyqtSlot()
@@ -394,6 +499,21 @@ class ChatHandler(QObject):
         win = self.parent()
         if win and isinstance(win, QMainWindow):
             win.move(x, y)
+
+    @pyqtSlot()
+    def startSystemDrag(self):
+        """Initiate native Windows window drag via ReleaseCapture + SendMessage.
+        The OS handles the entire drag operation natively — no JS coordinate tracking needed."""
+        win = self.parent()
+        if win and isinstance(win, QMainWindow):
+            try:
+                win.releaseMouse()
+                ctypes.windll.user32.ReleaseCapture()
+                hwnd = int(win.winId())
+                # SC_MOVE | 0x0002 = 0xF012 — initiate keyboard-driven window move
+                ctypes.windll.user32.SendMessageW(hwnd, 0x0112, 0xF012, 0)
+            except Exception:
+                pass
 
     @pyqtSlot(str)
     def openFileDialog(self, accept_filter):
@@ -504,16 +624,24 @@ print(json.dumps(result), flush=True)
             try:
                 env_vars = os.environ.copy()
                 env_vars['PYTHONIOENCODING'] = 'utf-8'
+                script_path = os.path.join(tempfile.gettempdir(), '_next_detect_gpu.py')
+                with open(script_path, 'w', encoding='utf-8') as f:
+                    f.write(script)
                 process = subprocess.Popen(
-                    [python_exe, '-u', '-c', script],
+                    [python_exe, '-u', script_path],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, text=True, encoding='utf-8',
-                    errors='ignore', cwd=BASE_DIR, env=env_vars
+                    errors='ignore', cwd=BASE_DIR, env=env_vars,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 output = ''
                 for line in process.stdout:
                     output += line.strip()
                 process.wait()
+                try:
+                    os.remove(script_path)
+                except Exception:
+                    pass
                 # 解析 JSON
                 try:
                     self.gpuDetectResult.emit(output.strip())
@@ -561,42 +689,57 @@ print(json.dumps(result), flush=True)
     # ---------- 推理后端 ----------
     @pyqtSlot()
     def startChat(self):
-        if self.inference_process and self.inference_process.poll() is None:
-            # 进程还在，检查是否已就绪
-            def _check_health():
-                for i in range(10):
-                    try:
-                        r = requests.get('http://127.0.0.1:5000/api/model/info', timeout=3)
-                        if r.status_code == 200:
-                            self.envLog.emit('✅ 推理后端已就绪')
-                            return
-                    except Exception:
-                        pass
-                    time.sleep(1)
-                self.envLog.emit('⚠️ 推理后端启动中，请稍候...')
-            threading.Thread(target=_check_health, daemon=True).start()
-            return
+        # ★ 先检查端口是否已有推理服务在运行（可能是上次残留的进程）
+        def _check_existing_or_start():
+            try:
+                r = requests.get('http://127.0.0.1:5000/api/model/info', timeout=3)
+                if r.status_code == 200:
+                    info = r.json()
+                    if info.get('status') == 'ready':
+                        self.modelLog.emit('✅ 检测到已有推理后端运行中，直接复用')
+                        self.modelState.emit('running')
+                        return
+                    else:
+                        self.modelLog.emit('⏳ 检测到推理后端已在加载，等待就绪...')
+                        self.modelState.emit('loading')
+                        # 等待已有后端就绪
+                        for _ in range(300):
+                            time.sleep(1)
+                            try:
+                                r2 = requests.get('http://127.0.0.1:5000/api/model/info', timeout=3)
+                                if r2.status_code == 200 and r2.json().get('status') == 'ready':
+                                    self.modelLog.emit('✅ 推理后端已就绪')
+                                    self.modelState.emit('running')
+                                    return
+                            except Exception:
+                                pass
+                        self.modelLog.emit('⚠️ 推理后端加载超时')
+                        return
+            except Exception:
+                pass  # 端口没有服务，需要启动新的
 
-        base_dir = get_base_dir()
-        self.envLog.emit('⏳ 正在启动推理后端...')
+            # 没有已有服务，启动新的
+            base_dir = get_base_dir()
+            self.modelLog.emit('⏳ 正在启动推理后端...')
+            self.modelState.emit('starting')
 
-        def _start_and_wait():
             try:
                 python_exe = get_python_exe()
                 inf_py = os.path.join(base_dir, '推理.py')
 
                 if not os.path.exists(inf_py):
-                    self.envLog.emit(f'❌ 找不到推理脚本: {inf_py}')
+                    self.modelLog.emit(f'❌ 找不到推理脚本: {inf_py}')
                     return
                 if not os.path.exists(python_exe):
-                    self.envLog.emit(f'❌ 找不到 Python 解释器: {python_exe}')
+                    self.modelLog.emit(f'❌ 找不到 Python 解释器: {python_exe}')
                     return
 
-                self.envLog.emit(f'📌 推理后端: {os.path.basename(python_exe)} + 推理.py')
+                self.modelLog.emit(f'📌 推理后端: {os.path.basename(python_exe)} + 推理.py')
                 self.inference_process = subprocess.Popen(
                     [python_exe, '-u', inf_py], cwd=base_dir,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL, text=True, encoding='utf-8', errors='ignore'
+                    stdin=subprocess.DEVNULL, text=True, encoding='utf-8', errors='ignore',
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
 
                 # 后台线程读取子进程输出，转发到 UI 日志
@@ -604,30 +747,48 @@ print(json.dumps(result), flush=True)
                     try:
                         for line in self.inference_process.stdout:
                             if line.strip():
-                                self.envLog.emit(f'[推理] {line.strip()}')
+                                self.modelLog.emit(f'[推理] {line.strip()}')
                     except Exception:
                         pass
                 threading.Thread(target=_read_output, daemon=True).start()
 
-                # 轮询等待后端就绪（最多 60 秒）
-                for i in range(60):
+                # 轮询等待后端就绪（最多 300 秒，机械硬盘加载模型较慢）
+                has_emitted_loading = False
+                for i in range(300):
                     time.sleep(1)
                     if self.inference_process.poll() is not None:
-                        self.envLog.emit(f'❌ 推理后端异常退出，退出码: {self.inference_process.returncode}')
+                        self.modelLog.emit(f'❌ 推理后端异常退出，退出码: {self.inference_process.returncode}')
+                        self.modelState.emit('closed')
                         return
                     try:
                         r = requests.get('http://127.0.0.1:5000/api/model/info', timeout=3)
                         if r.status_code == 200:
                             info = r.json()
-                            self.envLog.emit(f'✅ 推理后端已就绪 (状态: {info.get("status", "unknown")})')
-                            return
+                            status = info.get("status", "unknown")
+                            # ★ 发送加载进度到前端
+                            progress = info.get("load_progress", {})
+                            if progress:
+                                stage = progress.get("stage", "")
+                                pct = progress.get("progress", 0)
+                                msg = progress.get("message", "")
+                                self.modelLog.emit(f'🔄 [{pct}%] {msg}')
+                                # ★ 首次检测到加载进度时，切换到 loading 状态
+                                if not has_emitted_loading and (stage or pct > 0):
+                                    self.modelState.emit('loading')
+                                    has_emitted_loading = True
+                            if status == "ready":
+                                self.modelLog.emit(f'✅ 推理后端已就绪')
+                                self.modelState.emit('running')
+                                return
                     except Exception:
                         pass
-                self.envLog.emit('⚠️ 推理后端启动超时，请检查日志')
+                self.modelLog.emit('⚠️ 推理后端启动超时，请检查日志')
+                self.modelState.emit('closed')
             except Exception as e:
-                self.envLog.emit(f'❌ 启动推理后端失败: {e}')
+                self.modelLog.emit(f'❌ 启动推理后端失败: {e}')
+                self.modelState.emit('closed')
 
-        threading.Thread(target=_start_and_wait, daemon=True).start()
+        threading.Thread(target=_check_existing_or_start, daemon=True).start()
 
     # ---------- 数据集管理 ----------
     @pyqtSlot()
@@ -636,12 +797,43 @@ print(json.dumps(result), flush=True)
         os.makedirs(data_dir, exist_ok=True)
         items = []
         for f in os.listdir(data_dir):
-            if f.endswith('.jsonl'):
+            if f.endswith(('.jsonl', '.json', '.txt')):
                 try:
-                    lines = sum(1 for _ in open(os.path.join(data_dir, f), encoding='utf-8'))
+                    file_path = os.path.join(data_dir, f)
+                    with open(file_path, encoding='utf-8') as fh:
+                        content = fh.read().strip()
+                    
+                    # ★ 支持三种格式：JSONL / JSON / TXT（含JSON内容的TXT）
+                    if f.endswith('.jsonl'):
+                        # JSONL 格式：每行一个独立 JSON 对象
+                        valid_lines = 0
+                        for line in content.split('\n'):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                json.loads(line)
+                                valid_lines += 1
+                            except json.JSONDecodeError:
+                                continue
+                        lines = valid_lines
+                    else:
+                        # JSON 或 TXT 格式：尝试解析为 JSON 对象
+                        try:
+                            data_obj = json.loads(content)
+                            if isinstance(data_obj, dict) and 'data' in data_obj:
+                                lines = len(data_obj['data'])
+                            elif isinstance(data_obj, list):
+                                lines = len(data_obj)
+                            else:
+                                lines = 0
+                        except json.JSONDecodeError:
+                            # 不是 JSON 格式，按行数统计
+                            lines = sum(1 for line in content.split('\n') if line.strip())
+                    
+                    items.append({'name': f, 'path': os.path.join('datasets', f), 'lines': lines})
                 except Exception:
-                    lines = 0
-                items.append({'name': f, 'path': os.path.join('datasets', f), 'lines': lines})
+                    items.append({'name': f, 'path': os.path.join('datasets', f), 'lines': 0})
         self.dataLoaded.emit(json.dumps({'type': 'datasets', 'data': items}))
 
     @pyqtSlot(str, str)
@@ -673,34 +865,77 @@ print(json.dumps(result), flush=True)
         self.getDatasetList()
 
     # ---------- 训练 ----------
-    @pyqtSlot(str, str, str, str, str, str, str, str, str, str, str, str)
-    def startTrain(self, lora_name, dataset_path, mode, base_lora, lr, epochs, seq_len,
-                   batch_size, optimizer, weight_decay, lora_r, lora_alpha):
-        if self.train_worker and self.train_worker.isRunning():
-            self.trainLog.emit('⚠️ 训练正在进行中...')
-            return
+    @pyqtSlot(str)
+    def startTrain(self, config_json):
+        try:
+            self.trainLog.emit('[DEBUG] startTrain called with JSON')
+            config = json.loads(config_json)
+            lora_name = config['lora_name']
+            dataset_path = config['dataset_path']
+            mode = config['mode']
+            base_lora = config.get('base_lora', '')
+            lr = config.get('lr', '0.0003')
+            epochs = config.get('epochs', '4')
+            seq_len = config.get('seq_len', '512')
+            batch_size = config.get('batch_size', '4')
+            optimizer = config.get('optimizer', 'adamw')
+            weight_decay = config.get('weight_decay', '0.01')
+            lora_r = config.get('lora_r', '16')
+            lora_alpha = config.get('lora_alpha', '32')
+            self.trainLog.emit(f'[DEBUG] params: lora_name={lora_name}, mode={mode}')
+            
+            if self.train_worker and self.train_worker.isRunning():
+                self.trainLog.emit('⚠️ 训练正在进行中...')
+                return
 
-        config = {
-            "mode": mode,
-            "lora_name": lora_name,
-            "dataset_path": dataset_path,
-            "base_lora_path": base_lora,
-            "learning_rate": float(lr),
-            "epochs": int(epochs),
-            "max_seq_length": int(seq_len),
-            "batch_size": int(batch_size),
-            "optimizer": optimizer,
-            "weight_decay": float(weight_decay),
-            "lora_r": int(lora_r),
-            "lora_alpha": int(lora_alpha)
-        }
+            # ★ 训练前必须终止推理进程，释放 GPU 显存
+            if self.inference_process and self.inference_process.poll() is None:
+                self.trainLog.emit('⏳ 正在停止推理后端以释放显存...')
+                try:
+                    self.inference_process.terminate()
+                    try:
+                        self.inference_process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        self.inference_process.kill()
+                        self.inference_process.wait(timeout=5)
+                    self.trainLog.emit('✅ 推理后端已停止')
+                except Exception as e:
+                    self.trainLog.emit(f'⚠️ 停止推理后端异常: {e}')
+                self.inference_process = None
+                time.sleep(2)  # 等待 GPU 释放显存
 
-        self.trainLog.emit(f'⏳ 准备训练: {lora_name} ({mode})')
-        self.train_worker = TrainWorker(config, get_base_dir())
-        self.train_worker.log.connect(self.trainLog.emit)
-        self.train_worker.metrics.connect(self.trainMetrics.emit)
-        self.train_worker.finished_signal.connect(self._on_train_done)
-        self.train_worker.start()
+            # ★ 优化器名称映射：前端简写 → HuggingFace TrainingArguments 接受的名称
+            _OPT_MAP = {"adamw": "adamw_torch", "sgd": "sgd", "adafactor": "adafactor"}
+            optimizer = _OPT_MAP.get(optimizer, optimizer)
+
+            train_config = {
+                "mode": mode,
+                "lora_name": lora_name,
+                "dataset_path": dataset_path,
+                "base_lora_path": base_lora,
+                "learning_rate": float(lr),
+                "epochs": int(epochs),
+                "max_seq_length": int(seq_len),
+                "batch_size": int(batch_size),
+                "optimizer": optimizer,
+                "weight_decay": float(weight_decay),
+                "lora_r": int(lora_r),
+                "lora_alpha": int(lora_alpha)
+            }
+
+            self.trainLog.emit(f'[DEBUG] train_config: {json.dumps(train_config, ensure_ascii=False)}')
+            self.trainLog.emit(f'准备训练: {lora_name} ({mode})')
+            self.train_worker = TrainWorker(train_config, get_base_dir())
+            self.train_worker.log.connect(self.trainLog.emit)
+            self.train_worker.metrics.connect(self.trainMetrics.emit)
+            self.train_worker.finished_signal.connect(self._on_train_done)
+            self.trainLog.emit(f'🔍 [DEBUG] 启动 TrainWorker...')
+            self.train_worker.start()
+            self.trainLog.emit(f'🔍 [DEBUG] TrainWorker 已启动')
+        except Exception as e:
+            self.trainLog.emit(f'❌ [DEBUG] startTrain 异常: {e}')
+            import traceback
+            self.trainLog.emit(f'❌ [DEBUG] {traceback.format_exc()}')
 
     def _on_train_done(self, success):
         self.train_worker = None
@@ -708,6 +943,8 @@ print(json.dumps(result), flush=True)
         if success:
             self.trainLog.emit('✅ 训练完成！')
             self.getLoraWeights()  # 刷新 LoRA 列表
+        # ★ 训练结束后不自动重启推理后端，让用户手动启动以节省显存
+        self.trainLog.emit('💡 提示：如需对话，请切换到对话页自动启动推理后端')
 
     # ---------- LoRA 管理 ----------
     @pyqtSlot()
@@ -748,6 +985,39 @@ print(json.dumps(result), flush=True)
             shutil.rmtree(full_path)
         self.getLoraWeights()
 
+    @pyqtSlot()
+    def stopInference(self):
+        """卸载当前 LoRA 并停止推理后端进程"""
+        try:
+            # ★ 先尝试通过 API 卸载 LoRA（如果推理服务在运行）
+            try:
+                requests.post('http://127.0.0.1:5000/api/lora/unload', timeout=3)
+                self.modelLog.emit('✅ LoRA 已卸载')
+            except Exception:
+                pass  # 推理服务可能未启动
+            
+            # 然后停止推理进程
+            if self.inference_process and self.inference_process.poll() is None:
+                self.modelLog.emit('⏹️ 正在停止推理后端...')
+                self.inference_process.terminate()
+                # 等待进程终止
+                try:
+                    self.inference_process.wait(timeout=5)
+                    self.modelLog.emit('✅ 推理后端已停止')
+                except subprocess.TimeoutExpired:
+                    # 如果超时，强制杀死进程
+                    self.inference_process.kill()
+                    self.modelLog.emit('✅ 推理后端已强制停止')
+                self.inference_process = None
+            else:
+                self.modelLog.emit('ℹ️ 推理后端未运行')
+            
+            # ★ 只有在真正停止后才发送 closed 状态
+            self.modelState.emit('closed')
+        except Exception as e:
+            self.modelLog.emit(f'❌ 停止推理后端失败: {e}')
+            self.modelState.emit('closed')  # 即使出错也发送 closed 状态
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -774,6 +1044,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(300, self.handler.loadLanguage)
 
     def closeEvent(self, event):
+        self.handler._gpu_running = False
         if self.handler.inference_process and self.handler.inference_process.poll() is None:
             self.handler.inference_process.terminate()
         if self.handler.train_worker and self.handler.train_worker.isRunning():
