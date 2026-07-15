@@ -658,7 +658,7 @@ body {
 
 /* === Per-card Halftone (NeXTCrawler style: sparse dots at bottom, fade up) === */
 .halftone-target { position: relative; overflow: hidden; }
-.halftone-overlay {
+.halftone-target .halftone-overlay {
     position: absolute; inset: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 1; opacity: 0;
     transition: opacity 0.3s ease;
