@@ -567,45 +567,76 @@ body {
     z-index: 5;
 }
 
-/* === Bottom Halftone Overlay (temperature-reactive, fixed at bottom, animated) === */
-/* Only on chat page — halftone lives on #chat-content */
-#chat-content {
+/* === Organic Blob + Halftone Overlay === */
+/* Only around input area — NOT over chat messages */
+.chat-bottom-bar {
     position: relative;
+    overflow: hidden;
 }
-#chat-content::before {
-    content: '';
+.blob-container {
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    height: 320px;
+    height: 200px;
     pointer-events: none;
-    z-index: 4;
+    z-index: 0;
+    overflow: hidden;
     opacity: 0;
     transition: opacity 1s ease;
-    /* Halftone dot pattern - animated */
-    background-image:
-        radial-gradient(circle, hsla(var(--temp-hue), 75%, 65%, 0.50) 1.2px, transparent 1.8px),
-        radial-gradient(circle, hsla(var(--temp-hue), 65%, 55%, 0.30) 0.8px, transparent 1.4px);
-    background-size: 7px 7px, 11px 11px;
-    background-position: 0 0, 3.5px 3.5px;
-    animation: halftoneDrift 8s ease-in-out infinite alternate;
-    /* Fade from transparent at top to full at bottom */
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 30%, rgba(0,0,0,0.7) 65%, rgba(0,0,0,1) 100%);
-    mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 30%, rgba(0,0,0,0.7) 65%, rgba(0,0,0,1) 100%);
 }
-@keyframes halftoneDrift {
-    0%   { background-position: 0 0, 3.5px 3.5px; }
-    50%  { background-position: 2px -3px, 5px 1px; }
-    100% { background-position: -1px 2px, 2px 5px; }
-}
-/* Show halftone during inference */
-#main-content-wrapper.inferencing #chat-content::before {
+/* Show blobs during inference */
+#main-content-wrapper.inferencing .blob-container {
     opacity: 1;
 }
-/* Light theme: slightly more subtle halftone */
-#app-container.light-theme #chat-content::before {
+/* Organic flowing blobs */
+.blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(25px);
+    opacity: 0.65;
+    will-change: transform;
+    mix-blend-mode: screen;
+}
+/* Halftone dot pattern - always visible, neutral when idle, colored during inference */
+.halftone-overlay {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 200px;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.25;
+    transition: opacity 1s ease;
+    /* Default: neutral white dots (opposite of dark background) */
     background-image:
-        radial-gradient(circle, hsla(var(--temp-hue), 65%, 55%, 0.35) 1.2px, transparent 1.8px),
-        radial-gradient(circle, hsla(var(--temp-hue), 55%, 45%, 0.20) 0.8px, transparent 1.4px);
+        radial-gradient(circle, rgba(255, 255, 255, 0.40) 1.5px, transparent 2.2px),
+        radial-gradient(circle, rgba(255, 255, 255, 0.20) 1px, transparent 1.6px);
+    background-size: 6px 6px, 10px 10px;
+    background-position: 0 0, 3px 3px;
+    animation: halftoneDrift 6s ease-in-out infinite alternate;
+    /* Fade from transparent at top to visible at bottom */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 40%, rgba(0,0,0,0.9) 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 40%, rgba(0,0,0,0.9) 100%);
+}
+/* During inference: switch to temperature-reactive colored halftone */
+#main-content-wrapper.inferencing .halftone-overlay {
+    opacity: 1;
+    background-image:
+        radial-gradient(circle, hsla(var(--temp-hue), 80%, 70%, 0.50) 1.5px, transparent 2.2px),
+        radial-gradient(circle, hsla(var(--temp-hue), 70%, 60%, 0.25) 1px, transparent 1.6px);
+}
+@keyframes halftoneDrift {
+    0%   { background-position: 0 0, 3px 3px; }
+    50%  { background-position: 3px -4px, 6px 2px; }
+    100% { background-position: -2px 3px, 1px 6px; }
+}
+/* Light theme: neutral dark dots (opposite of light background) */
+#app-container.light-theme .halftone-overlay {
+    background-image:
+        radial-gradient(circle, rgba(0, 0, 0, 0.25) 1.5px, transparent 2.2px),
+        radial-gradient(circle, rgba(0, 0, 0, 0.12) 1px, transparent 1.6px);
+}
+#app-container.light-theme .blob {
+    opacity: 0.40;
+    filter: blur(30px);
 }
 
 /* === Main Content === */
