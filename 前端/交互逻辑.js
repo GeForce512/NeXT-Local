@@ -295,7 +295,7 @@ class CardHalftoneEngine {
         this.spacing = 28;
         this.baseRadius = 0.8;
         this.maxRadius = 3.0;
-        this.mouseRadius = 200;
+        this.mouseRadius = 120;
         this.mouseX = -9999;
         this.mouseY = -9999;
         this.running = false;
