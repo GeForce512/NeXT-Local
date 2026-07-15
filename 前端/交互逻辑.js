@@ -292,10 +292,10 @@ class CardHalftoneEngine {
         this.card = card;
         this.canvas = card.querySelector('.halftone-overlay');
         this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
-        this.spacing = 24;
-        this.baseRadius = 1.0;
-        this.maxRadius = 4.0;
-        this.mouseRadius = 180;
+        this.spacing = 36;
+        this.baseRadius = 0.8;
+        this.maxRadius = 2.5;
+        this.mouseRadius = 120;
         this.mouseX = -9999;
         this.mouseY = -9999;
         this.running = false;
@@ -388,7 +388,7 @@ class CardHalftoneEngine {
         const { ctx, spacing, baseRadius, maxRadius, mouseRadius, mouseX, mouseY, w, h } = this;
         if (!ctx || w <= 0 || h <= 0) return;
         const isLight = document.getElementById('main-content-wrapper')?.classList.contains('light-theme') || false;
-        const baseAlpha = isLight ? 0.12 : 0.08;
+        const baseAlpha = isLight ? 0.08 : 0.05;
         const mr2 = mouseRadius * mouseRadius;
 
         ctx.clearRect(0, 0, w, h);
@@ -409,7 +409,7 @@ class CardHalftoneEngine {
 
         // Enhanced dots near mouse
         if (mouseX > -999) {
-            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.24)' : 'rgba(255,255,255,0.2)';
+            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.12)';
             ctx.beginPath();
             for (let x = spacing / 2; x < w; x += spacing) {
                 for (let y = spacing / 2; y < h; y += spacing) {
@@ -454,6 +454,132 @@ function animateHue() {
     if (currentHue >= 360) currentHue -= 360;
     document.documentElement.style.setProperty('--temp-hue', Math.round(currentHue));
     animFrame = requestAnimationFrame(animateHue);
+}
+
+// ==================== Organic Blob Animation (Apple Watch Mindfulness Style) ====================
+let blobContainer = null;
+let blobElements = [];
+let blobAnimFrame = null;
+let blobStartTime = 0;
+
+// Blob configuration - each blob has unique movement pattern
+const BLOB_CONFIGS = [
+    { size: 280, x: 0.15, y: 0.6, speedX: 0.3, speedY: 0.2, ampX: 80, ampY: 60, phase: 0 },
+    { size: 220, x: 0.55, y: 0.7, speedX: 0.25, speedY: 0.35, ampX: 100, ampY: 50, phase: 1.5 },
+    { size: 320, x: 0.8, y: 0.5, speedX: 0.2, speedY: 0.25, ampX: 70, ampY: 80, phase: 3.0 },
+    { size: 180, x: 0.35, y: 0.8, speedX: 0.4, speedY: 0.15, ampX: 60, ampY: 40, phase: 4.5 },
+    { size: 260, x: 0.7, y: 0.3, speedX: 0.15, speedY: 0.3, ampX: 90, ampY: 70, phase: 2.0 },
+    { size: 200, x: 0.25, y: 0.4, speedX: 0.35, speedY: 0.2, ampX: 50, ampY: 60, phase: 5.5 },
+];
+
+function createBlobs() {
+    if (blobContainer) return; // Already created
+
+    const chatBottomBar = document.querySelector('.chat-bottom-bar');
+    if (!chatBottomBar) return;
+
+    blobContainer = document.createElement('div');
+    blobContainer.className = 'blob-container';
+
+    const hue = currentHue || 200;
+
+    BLOB_CONFIGS.forEach((config, i) => {
+        const blob = document.createElement('div');
+        blob.className = 'blob';
+
+        // Size
+        blob.style.width = config.size + 'px';
+        blob.style.height = config.size + 'px';
+
+        // Color - vary saturation and lightness per blob for depth
+        const sat = 70 + (i % 3) * 10; // 70-90%
+        const light = 55 + (i % 2) * 10; // 55-65%
+        const alpha = 0.5 + (i % 3) * 0.1; // 0.5-0.7
+        blob.style.background = `radial-gradient(circle, hsla(${hue}, ${sat}%, ${light}%, ${alpha}) 0%, hsla(${hue}, ${sat}%, ${light}%, 0) 70%)`;
+
+        // Initial position
+        blob.style.left = '0px';
+        blob.style.top = '0px';
+
+        blobContainer.appendChild(blob);
+        blobElements.push({
+            el: blob,
+            config: config,
+            baseX: config.x,
+            baseY: config.y
+        });
+    });
+
+    chatBottomBar.appendChild(blobContainer);
+
+    // Create halftone dot overlay
+    const halftoneOverlay = document.createElement('div');
+    halftoneOverlay.className = 'halftone-overlay';
+    chatBottomBar.appendChild(halftoneOverlay);
+
+    blobStartTime = performance.now();
+
+    // Start animation
+    animateBlobs();
+}
+
+function animateBlobs() {
+    const now = performance.now();
+    const elapsed = (now - blobStartTime) / 1000; // seconds
+    const hue = currentHue || 200;
+
+    blobElements.forEach((blob, i) => {
+        const config = blob.config;
+
+        // Organic movement using multiple sine waves
+        const x = blob.baseX +
+            Math.sin(elapsed * config.speedX + config.phase) * 0.08 +
+            Math.sin(elapsed * config.speedX * 0.7 + config.phase * 1.3) * 0.04;
+
+        const y = blob.baseY +
+            Math.sin(elapsed * config.speedY + config.phase * 0.8) * 0.06 +
+            Math.cos(elapsed * config.speedY * 0.5 + config.phase * 1.5) * 0.05;
+
+        // Breathing scale effect
+        const scale = 1 +
+            Math.sin(elapsed * 0.3 + config.phase) * 0.15 +
+            Math.sin(elapsed * 0.2 + config.phase * 0.7) * 0.1;
+
+        // Convert to pixels
+        const containerWidth = blobContainer.offsetWidth || 800;
+        const containerHeight = blobContainer.offsetHeight || 400;
+
+        const px = x * containerWidth - config.size / 2;
+        const py = y * containerHeight - config.size / 2;
+
+        // Update color dynamically
+        const sat = 70 + (i % 3) * 10;
+        const light = 55 + (i % 2) * 10;
+        const alpha = 0.5 + (i % 3) * 0.1;
+        blob.el.style.background = `radial-gradient(circle, hsla(${hue}, ${sat}%, ${light}%, ${alpha}) 0%, hsla(${hue}, ${sat}%, ${light}%, 0) 70%)`;
+
+        blob.el.style.transform = `translate(${px}px, ${py}px) scale(${scale})`;
+    });
+
+    blobAnimFrame = requestAnimationFrame(animateBlobs);
+}
+
+function stopBlobs() {
+    if (blobAnimFrame) {
+        cancelAnimationFrame(blobAnimFrame);
+        blobAnimFrame = null;
+    }
+
+    if (blobContainer) {
+        blobContainer.remove();
+        blobContainer = null;
+    }
+
+    // Remove halftone overlay
+    const halftoneOverlay = document.querySelector('.chat-bottom-bar .halftone-overlay');
+    if (halftoneOverlay) halftoneOverlay.remove();
+
+    blobElements = [];
 }
 
 // ==================== Chat: Model Status ====================
@@ -576,6 +702,7 @@ async function sendMessage(text) {
     const thinkTitle = thinkBlock.querySelector('.thinking-title');
     isGenerating = true;
     document.getElementById('main-content-wrapper').classList.add('inferencing');
+    createBlobs();
     updateSendBtnState();
     const controller = new AbortController();
     currentAbortController = controller;
@@ -661,6 +788,7 @@ async function sendMessage(text) {
         isGenerating = false;
         currentAbortController = null;
         document.getElementById('main-content-wrapper').classList.remove('inferencing');
+        stopBlobs();
         updateSendBtnState();
     }
 }

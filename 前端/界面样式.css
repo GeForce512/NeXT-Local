@@ -717,8 +717,8 @@ body {
     transition: opacity 0.2s ease;
     will-change: opacity;
 }
-.halftone-target:hover .halftone-overlay { opacity: 0.75; }
-#app-container.light-theme .halftone-target:hover .halftone-overlay { opacity: 0.6; }
+.halftone-target:hover .halftone-overlay { opacity: 0.8; }
+#app-container.light-theme .halftone-target:hover .halftone-overlay { opacity: 0.65; }
 
 /* === Collapsible Log Sections === */
 .log-section { margin-top: 12px; }
