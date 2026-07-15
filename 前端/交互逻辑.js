@@ -292,10 +292,10 @@ class CardHalftoneEngine {
         this.card = card;
         this.canvas = card.querySelector('.halftone-overlay');
         this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
-        this.spacing = 36;
-        this.baseRadius = 0.8;
-        this.maxRadius = 2.5;
-        this.mouseRadius = 120;
+        this.spacing = 28;
+        this.baseRadius = 1.0;
+        this.maxRadius = 4.5;
+        this.mouseRadius = 200;
         this.mouseX = -9999;
         this.mouseY = -9999;
         this.running = false;
@@ -388,7 +388,7 @@ class CardHalftoneEngine {
         const { ctx, spacing, baseRadius, maxRadius, mouseRadius, mouseX, mouseY, w, h } = this;
         if (!ctx || w <= 0 || h <= 0) return;
         const isLight = document.getElementById('main-content-wrapper')?.classList.contains('light-theme') || false;
-        const baseAlpha = isLight ? 0.08 : 0.05;
+        const baseAlpha = isLight ? 0.08 : 0.12;
         const mr2 = mouseRadius * mouseRadius;
 
         ctx.clearRect(0, 0, w, h);
@@ -409,7 +409,7 @@ class CardHalftoneEngine {
 
         // Enhanced dots near mouse
         if (mouseX > -999) {
-            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.12)';
+            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.35)';
             ctx.beginPath();
             for (let x = spacing / 2; x < w; x += spacing) {
                 for (let y = spacing / 2; y < h; y += spacing) {
