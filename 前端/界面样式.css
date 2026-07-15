@@ -33,6 +33,8 @@
     --glass-blur: 60px;
     --glass-saturate: 180%;
     --glass-brightness: 1.1;
+    /* Temperature hue (default blue-ish for idle) */
+    --temp-hue: 200;
 }
 
 /* === iOS Light Mode Colors === */
@@ -563,6 +565,37 @@ body {
         transparent 100%);
     pointer-events: none;
     z-index: 5;
+}
+
+/* === Bottom Halftone Overlay (temperature-reactive, fixed at bottom) === */
+#main-content-wrapper::before {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 280px;
+    pointer-events: none;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+    /* Halftone dot pattern via SVG data URI */
+    background-image:
+        radial-gradient(circle, hsla(var(--temp-hue), 70%, 60%, 0.55) 1px, transparent 1.5px),
+        radial-gradient(circle, hsla(var(--temp-hue), 60%, 50%, 0.35) 0.8px, transparent 1.2px);
+    background-size: 8px 8px, 12px 12px;
+    background-position: 0 0, 4px 4px;
+    /* Fade from transparent at top to full at bottom */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.8) 70%, rgba(0,0,0,1) 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.8) 70%, rgba(0,0,0,1) 100%);
+}
+/* Show halftone during inference */
+#main-content-wrapper.inferencing::before {
+    opacity: 1;
+}
+/* Light theme: slightly more subtle halftone */
+#app-container.light-theme #main-content-wrapper::before {
+    background-image:
+        radial-gradient(circle, hsla(var(--temp-hue), 60%, 50%, 0.40) 1px, transparent 1.5px),
+        radial-gradient(circle, hsla(var(--temp-hue), 50%, 45%, 0.25) 0.8px, transparent 1.2px);
 }
 
 /* === Main Content === */

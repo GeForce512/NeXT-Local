@@ -572,6 +572,7 @@ async function sendMessage(text) {
     const thinkContent = thinkBlock.querySelector('.thinking-content');
     const thinkTitle = thinkBlock.querySelector('.thinking-title');
     isGenerating = true;
+    document.getElementById('main-content-wrapper').classList.add('inferencing');
     updateSendBtnState();
     const controller = new AbortController();
     currentAbortController = controller;
@@ -656,6 +657,7 @@ async function sendMessage(text) {
     } finally {
         isGenerating = false;
         currentAbortController = null;
+        document.getElementById('main-content-wrapper').classList.remove('inferencing');
         updateSendBtnState();
     }
 }
