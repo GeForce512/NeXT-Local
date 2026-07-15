@@ -1011,7 +1011,7 @@ body {
     display: flex; flex-direction: column; gap: 16px;
     position: relative; z-index: 5;
 }
-.magic-switches { display: flex; gap: 8px; flex-wrap: wrap; }
+.magic-switches { display: flex; gap: 8px; flex-wrap: wrap; position: relative; z-index: 2; }
 .switch-pill {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 16px;
@@ -1034,6 +1034,7 @@ body {
     background: var(--glass-bg-light);
     transition: border-color 0.2s, box-shadow 0.2s;
     position: relative;
+    z-index: 2;
 }
 .input-wrapper:focus-within { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.12); }
 .chat-input {
