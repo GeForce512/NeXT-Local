@@ -430,9 +430,12 @@ class CardHalftoneEngine {
 
 // ==================== Temperature Hue Animation ====================
 function applyTemperatureHue(temp) {
-    let hue = temp <= 0.7 ? 200 - ((temp - 0.1) / 0.6) * 80 : 120 - ((temp - 0.7) / 0.8) * 120;
+    // Smooth gradient: blue(210) → cyan(180) → teal(150) → green(120) → yellow-green(90)
+    // temp range 0.1~2.0 maps to hue 210~90, gentle slope
+    let hue = 210 - ((temp - 0.1) / 1.9) * 120;
+    if (hue < 90) hue = 90;
+    if (hue > 210) hue = 210;
     targetHue = Math.round(hue);
-    if (targetHue < 0) targetHue += 360;
     if (!animFrame) animateHue();
 }
 
@@ -692,10 +695,45 @@ function renderHistoryList() {
     sessions.forEach(sess => {
         const item = document.createElement('div');
         item.className = 'history-item' + (sess.id === currentSessionId ? ' active' : '');
-        item.textContent = sess.title;
-        item.onclick = () => loadSession(sess.id);
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = sess.title;
+        titleSpan.style.flex = '1';
+        titleSpan.style.overflow = 'hidden';
+        titleSpan.style.textOverflow = 'ellipsis';
+        titleSpan.style.whiteSpace = 'nowrap';
+        titleSpan.style.cursor = 'pointer';
+        titleSpan.onclick = () => loadSession(sess.id);
+        const delBtn = document.createElement('button');
+        delBtn.className = 'history-delete-btn';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = currentLang === 'en' ? 'Delete' : '删除';
+        delBtn.onclick = (e) => {
+            e.stopPropagation();
+            deleteSession(sess.id);
+        };
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.gap = '4px';
+        item.appendChild(titleSpan);
+        item.appendChild(delBtn);
         historyList.appendChild(item);
     });
+}
+
+function deleteSession(id) {
+    sessions = sessions.filter(s => s.id !== id);
+    if (currentSessionId === id) {
+        currentSessionId = sessions.length > 0 ? sessions[sessions.length - 1].id : null;
+        chatMessages.innerHTML = '';
+        if (currentSessionId) {
+            const sess = sessions.find(s => s.id === currentSessionId);
+            if (sess) sess.messages.forEach(m => appendMessage(m.role, m.content));
+        }
+    }
+    if (window.chatObject) {
+        window.chatObject.saveSessions(JSON.stringify(sessions));
+    }
+    renderHistoryList();
 }
 
 function loadSession(id) {
@@ -1148,7 +1186,7 @@ document.getElementById('train-btn')?.addEventListener('click', () => {
     const mode = document.querySelector('input[name="train-mode"]:checked')?.value || 'new';
     const baseLora = baseLoraSelect?.value || '';
     // Read all training params
-    const lr = document.getElementById('lr-input')?.value || '0.0003';
+    const lr = document.getElementById('lr-input')?.value || '0.001';
     const epochs = document.getElementById('epochs-input')?.value || '4';
     const seqLen = document.getElementById('seqlen-input')?.value || '512';
     const batchSize = document.getElementById('batchsize-input')?.value || '4';
