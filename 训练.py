@@ -217,8 +217,17 @@ def run_training(log_fn=None, config=None, metrics_fn=None):
     # ★ 保存 LoRA 权重
     try:
         safe = re.sub(r'[\\/:*?"<>|]', '_', name).strip()[:50] or "un"
-        save_dir = os.path.join(BASE_DIR, "lora_weights", f"{safe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        save_dir = os.path.join(BASE_DIR, "lora_weights", safe)
         log(f"💾 正在保存 LoRA 到: {save_dir}")
+        
+        # 如果已存在旧版本，先备份再覆盖
+        if os.path.exists(save_dir):
+            backup_dir = save_dir + "_backup"
+            if os.path.exists(backup_dir):
+                import shutil
+                shutil.rmtree(backup_dir)
+            os.rename(save_dir, backup_dir)
+            log(f"📦 旧版本已备份到：{os.path.basename(backup_dir)}")
         os.makedirs(save_dir, exist_ok=True)
         
         # 保存元数据
