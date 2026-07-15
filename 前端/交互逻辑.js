@@ -388,42 +388,28 @@ class CardHalftoneEngine {
         const { ctx, spacing, baseRadius, maxRadius, mouseRadius, mouseX, mouseY, w, h } = this;
         if (!ctx || w <= 0 || h <= 0) return;
         const isLight = document.getElementById('main-content-wrapper')?.classList.contains('light-theme') || false;
-        const baseAlpha = isLight ? 0.08 : 0.12;
         const mr2 = mouseRadius * mouseRadius;
 
         ctx.clearRect(0, 0, w, h);
 
-        // Base dots
-        ctx.fillStyle = isLight ? `rgba(0,0,0,${baseAlpha})` : `rgba(255,255,255,${baseAlpha})`;
-        ctx.beginPath();
-        for (let x = spacing / 2; x < w; x += spacing) {
-            for (let y = spacing / 2; y < h; y += spacing) {
-                const dx = x - mouseX, dy = y - mouseY;
-                if (dx * dx + dy * dy >= mr2) {
-                    ctx.moveTo(x + baseRadius, y);
-                    ctx.arc(x, y, baseRadius, 0, 6.2832);
-                }
-            }
-        }
-        ctx.fill();
-
-        // Enhanced dots near mouse
+        // Only draw dots near mouse - no base grid
         if (mouseX > -999) {
-            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.35)';
-            ctx.beginPath();
             for (let x = spacing / 2; x < w; x += spacing) {
                 for (let y = spacing / 2; y < h; y += spacing) {
                     const dx = x - mouseX, dy = y - mouseY;
                     const d2 = dx * dx + dy * dy;
                     if (d2 < mr2) {
-                        const ratio = 1 - Math.sqrt(d2) / mouseRadius;
+                        const dist = Math.sqrt(d2);
+                        const ratio = 1 - dist / mouseRadius;
                         const r = baseRadius + (maxRadius - baseRadius) * ratio * ratio;
-                        ctx.moveTo(x + r, y);
+                        const alpha = ratio * ratio * (isLight ? 0.35 : 0.40);
+                        ctx.fillStyle = isLight ? `rgba(0,0,0,${alpha})` : `rgba(255,255,255,${alpha})`;
+                        ctx.beginPath();
                         ctx.arc(x, y, r, 0, 6.2832);
+                        ctx.fill();
                     }
                 }
             }
-            ctx.fill();
         }
     }
 }
