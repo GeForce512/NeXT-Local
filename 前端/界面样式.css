@@ -597,7 +597,8 @@ body {
     mix-blend-mode: screen;
 }
 /* Halftone dot pattern - always visible, neutral when idle, colored during inference */
-.halftone-overlay {
+/* Only for chat input area, NOT for card halftone canvases */
+.chat-bottom-bar .halftone-overlay {
     position: absolute;
     bottom: 0; left: 0; right: 0;
     height: 200px;
@@ -617,7 +618,7 @@ body {
     mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 40%, rgba(0,0,0,0.9) 100%);
 }
 /* During inference: switch to temperature-reactive colored halftone */
-#main-content-wrapper.inferencing .halftone-overlay {
+#main-content-wrapper.inferencing .chat-bottom-bar .halftone-overlay {
     opacity: 1;
     background-image:
         radial-gradient(circle, hsla(var(--temp-hue), 80%, 70%, 0.50) 1.5px, transparent 2.2px),
@@ -629,7 +630,7 @@ body {
     100% { background-position: -2px 3px, 1px 6px; }
 }
 /* Light theme: neutral dark dots (opposite of light background) */
-#app-container.light-theme .halftone-overlay {
+#app-container.light-theme .chat-bottom-bar .halftone-overlay {
     background-image:
         radial-gradient(circle, rgba(0, 0, 0, 0.25) 1.5px, transparent 2.2px),
         radial-gradient(circle, rgba(0, 0, 0, 0.12) 1px, transparent 1.6px);
