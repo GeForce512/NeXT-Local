@@ -567,77 +567,23 @@ body {
     z-index: 5;
 }
 
-/* === Organic Blob + Halftone Overlay === */
-/* Only around input area — NOT over chat messages */
+/* === Halftone Overlay (chat input area) === */
 .chat-bottom-bar {
     position: relative;
     overflow: hidden;
 }
-.blob-container {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 200px;
-    pointer-events: none;
-    z-index: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: opacity 1s ease;
-}
-/* Show blobs during inference */
-#main-content-wrapper.inferencing .blob-container {
-    opacity: 1;
-}
-/* Organic flowing blobs */
-.blob {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(25px);
-    opacity: 0.65;
-    will-change: transform;
-    mix-blend-mode: screen;
-}
-/* Halftone dot pattern - always visible, neutral when idle, colored during inference */
-/* Only for chat input area, NOT for card halftone canvases */
+/* Halftone pattern - neutral when idle, colored during inference */
 .chat-bottom-bar .halftone-overlay {
     position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 200px;
+    inset: 0;
     pointer-events: none;
-    z-index: 1;
-    opacity: 0.25;
-    transition: opacity 1s ease;
-    /* Default: neutral white dots (opposite of dark background) */
-    background-image:
-        radial-gradient(circle, rgba(255, 255, 255, 0.40) 1.5px, transparent 2.2px),
-        radial-gradient(circle, rgba(255, 255, 255, 0.20) 1px, transparent 1.6px);
-    background-size: 6px 6px, 10px 10px;
-    background-position: 0 0, 3px 3px;
-    animation: halftoneDrift 6s ease-in-out infinite alternate;
-    /* Fade from transparent at top to visible at bottom */
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 40%, rgba(0,0,0,0.9) 100%);
-    mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 40%, rgba(0,0,0,0.9) 100%);
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 0.8s ease;
 }
-/* During inference: switch to temperature-reactive colored halftone */
+/* During inference: show temperature-reactive halftone */
 #main-content-wrapper.inferencing .chat-bottom-bar .halftone-overlay {
     opacity: 1;
-    background-image:
-        radial-gradient(circle, hsla(var(--temp-hue), 80%, 70%, 0.50) 1.5px, transparent 2.2px),
-        radial-gradient(circle, hsla(var(--temp-hue), 70%, 60%, 0.25) 1px, transparent 1.6px);
-}
-@keyframes halftoneDrift {
-    0%   { background-position: 0 0, 3px 3px; }
-    50%  { background-position: 3px -4px, 6px 2px; }
-    100% { background-position: -2px 3px, 1px 6px; }
-}
-/* Light theme: neutral dark dots (opposite of light background) */
-#app-container.light-theme .chat-bottom-bar .halftone-overlay {
-    background-image:
-        radial-gradient(circle, rgba(0, 0, 0, 0.25) 1.5px, transparent 2.2px),
-        radial-gradient(circle, rgba(0, 0, 0, 0.12) 1px, transparent 1.6px);
-}
-#app-container.light-theme .blob {
-    opacity: 0.40;
-    filter: blur(30px);
 }
 
 /* === Main Content === */
@@ -1081,15 +1027,21 @@ body {
 .pill-icon { width: 16px; height: 16px; stroke: currentColor; flex-shrink: 0; }
 .pill-text { white-space: nowrap; }
 .smart-input-area { display: flex; gap: 10px; align-items: center; }
-.chat-input {
-    flex: 1; padding: 14px 18px;
+.input-wrapper {
+    flex: 1; display: flex; align-items: center;
     border: 1px solid var(--glass-border);
     border-radius: var(--radius);
     background: var(--glass-bg-light);
-    color: var(--text-main); font-size: 14px;
-    outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
 }
-.chat-input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.12); }
+.input-wrapper:focus-within { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.12); }
+.chat-input {
+    flex: 1; padding: 14px 18px;
+    border: none; background: transparent;
+    color: var(--text-main); font-size: 14px;
+    outline: none; min-width: 0;
+}
 .chat-input::placeholder { color: var(--text-muted); }
 
 .chat-send-btn {
@@ -1113,9 +1065,14 @@ body {
 }
 .stop-btn {
     background: var(--accent-red); color: #fff; border: none;
-    border-radius: var(--radius); padding: 10px 16px;
-    cursor: pointer; height: 48px; flex-shrink: 0; margin-left: 12px;
+    border-radius: 20px; padding: 6px 16px;
+    cursor: pointer; flex-shrink: 0;
+    font-size: 13px; height: 34px;
+    margin-right: 8px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
 }
+.stop-btn:hover { filter: brightness(1.15); }
 
 /* === Theme Toggle === */
 .theme-toggle-btn { display: inline-flex; align-items: center; gap: 8px; position: relative; overflow: visible; }
@@ -1241,11 +1198,11 @@ body {
 #app-container.light-theme .chat-bottom-bar {
     background: #ffffff;
 }
-#app-container.light-theme .chat-input {
+#app-container.light-theme .input-wrapper {
     background: #f2f2f7;
     border: 1px solid rgba(60, 60, 67, 0.15);
 }
-#app-container.light-theme .chat-input:focus {
+#app-container.light-theme .input-wrapper:focus-within {
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
 }

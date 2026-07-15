@@ -416,10 +416,10 @@ class CardHalftoneEngine {
 
 // ==================== Temperature Hue Animation ====================
 function applyTemperatureHue(temp) {
-    // Smooth gradient: blue(210) → cyan(180) → teal(150) → green(120) → yellow-green(90)
-    // temp range 0.1~2.0 maps to hue 210~90, gentle slope
-    let hue = 210 - ((temp - 0.1) / 1.9) * 120;
-    if (hue < 90) hue = 90;
+    // Cold (analytical/code): blue 210° → Warm (creative/emotional): red-orange 0°
+    // temp range 0.1~2.0 maps to hue 210~0, crossing through cyan/green/yellow/orange
+    let hue = 210 - ((temp - 0.1) / 1.9) * 210;
+    if (hue < 0) hue = 0;
     if (hue > 210) hue = 210;
     targetHue = Math.round(hue);
     if (!animFrame) animateHue();
@@ -442,130 +442,138 @@ function animateHue() {
     animFrame = requestAnimationFrame(animateHue);
 }
 
-// ==================== Organic Blob Animation (Apple Watch Mindfulness Style) ====================
-let blobContainer = null;
-let blobElements = [];
-let blobAnimFrame = null;
-let blobStartTime = 0;
+// ==================== Chat Halftone Canvas (multi-shape, radiate from input) ====================
+let chatHalftoneCanvas = null;
+let chatHalftoneCtx = null;
+let chatHalftoneAnimFrame = null;
 
-// Blob configuration - each blob has unique movement pattern
-const BLOB_CONFIGS = [
-    { size: 280, x: 0.15, y: 0.6, speedX: 0.3, speedY: 0.2, ampX: 80, ampY: 60, phase: 0 },
-    { size: 220, x: 0.55, y: 0.7, speedX: 0.25, speedY: 0.35, ampX: 100, ampY: 50, phase: 1.5 },
-    { size: 320, x: 0.8, y: 0.5, speedX: 0.2, speedY: 0.25, ampX: 70, ampY: 80, phase: 3.0 },
-    { size: 180, x: 0.35, y: 0.8, speedX: 0.4, speedY: 0.15, ampX: 60, ampY: 40, phase: 4.5 },
-    { size: 260, x: 0.7, y: 0.3, speedX: 0.15, speedY: 0.3, ampX: 90, ampY: 70, phase: 2.0 },
-    { size: 200, x: 0.25, y: 0.4, speedX: 0.35, speedY: 0.2, ampX: 50, ampY: 60, phase: 5.5 },
-];
+// Shape types for variety
+const SHAPES = ['circle', 'square', 'diamond', 'triangle'];
 
-function createBlobs() {
-    if (blobContainer) return; // Already created
+function createChatHalftone() {
+    if (chatHalftoneCanvas) return;
 
     const chatBottomBar = document.querySelector('.chat-bottom-bar');
     if (!chatBottomBar) return;
 
-    blobContainer = document.createElement('div');
-    blobContainer.className = 'blob-container';
+    chatHalftoneCanvas = document.createElement('canvas');
+    chatHalftoneCanvas.className = 'halftone-overlay';
+    chatBottomBar.appendChild(chatHalftoneCanvas);
+    chatHalftoneCtx = chatHalftoneCanvas.getContext('2d');
 
-    const hue = currentHue || 200;
-
-    BLOB_CONFIGS.forEach((config, i) => {
-        const blob = document.createElement('div');
-        blob.className = 'blob';
-
-        // Size
-        blob.style.width = config.size + 'px';
-        blob.style.height = config.size + 'px';
-
-        // Color - vary saturation and lightness per blob for depth
-        const sat = 70 + (i % 3) * 10; // 70-90%
-        const light = 55 + (i % 2) * 10; // 55-65%
-        const alpha = 0.5 + (i % 3) * 0.1; // 0.5-0.7
-        blob.style.background = `radial-gradient(circle, hsla(${hue}, ${sat}%, ${light}%, ${alpha}) 0%, hsla(${hue}, ${sat}%, ${light}%, 0) 70%)`;
-
-        // Initial position
-        blob.style.left = '0px';
-        blob.style.top = '0px';
-
-        blobContainer.appendChild(blob);
-        blobElements.push({
-            el: blob,
-            config: config,
-            baseX: config.x,
-            baseY: config.y
-        });
-    });
-
-    chatBottomBar.appendChild(blobContainer);
-
-    // Create halftone dot overlay
-    const halftoneOverlay = document.createElement('div');
-    halftoneOverlay.className = 'halftone-overlay';
-    chatBottomBar.appendChild(halftoneOverlay);
-
-    blobStartTime = performance.now();
-
-    // Start animation
-    animateBlobs();
+    resizeChatHalftone();
+    if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => { resizeChatHalftone(); drawChatHalftone(); });
+        ro.observe(chatBottomBar);
+    }
 }
 
-function animateBlobs() {
-    const now = performance.now();
-    const elapsed = (now - blobStartTime) / 1000; // seconds
-    const hue = currentHue || 200;
-
-    blobElements.forEach((blob, i) => {
-        const config = blob.config;
-
-        // Organic movement using multiple sine waves
-        const x = blob.baseX +
-            Math.sin(elapsed * config.speedX + config.phase) * 0.08 +
-            Math.sin(elapsed * config.speedX * 0.7 + config.phase * 1.3) * 0.04;
-
-        const y = blob.baseY +
-            Math.sin(elapsed * config.speedY + config.phase * 0.8) * 0.06 +
-            Math.cos(elapsed * config.speedY * 0.5 + config.phase * 1.5) * 0.05;
-
-        // Breathing scale effect
-        const scale = 1 +
-            Math.sin(elapsed * 0.3 + config.phase) * 0.15 +
-            Math.sin(elapsed * 0.2 + config.phase * 0.7) * 0.1;
-
-        // Convert to pixels
-        const containerWidth = blobContainer.offsetWidth || 800;
-        const containerHeight = blobContainer.offsetHeight || 400;
-
-        const px = x * containerWidth - config.size / 2;
-        const py = y * containerHeight - config.size / 2;
-
-        // Update color dynamically
-        const sat = 70 + (i % 3) * 10;
-        const light = 55 + (i % 2) * 10;
-        const alpha = 0.5 + (i % 3) * 0.1;
-        blob.el.style.background = `radial-gradient(circle, hsla(${hue}, ${sat}%, ${light}%, ${alpha}) 0%, hsla(${hue}, ${sat}%, ${light}%, 0) 70%)`;
-
-        blob.el.style.transform = `translate(${px}px, ${py}px) scale(${scale})`;
-    });
-
-    blobAnimFrame = requestAnimationFrame(animateBlobs);
+function resizeChatHalftone() {
+    if (!chatHalftoneCanvas) return;
+    const bar = chatHalftoneCanvas.parentElement;
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const w = bar.offsetWidth;
+    const h = bar.offsetHeight;
+    chatHalftoneCanvas.width = w * dpr;
+    chatHalftoneCanvas.height = h * dpr;
+    chatHalftoneCanvas.style.width = w + 'px';
+    chatHalftoneCanvas.style.height = h + 'px';
+    chatHalftoneCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function stopBlobs() {
-    if (blobAnimFrame) {
-        cancelAnimationFrame(blobAnimFrame);
-        blobAnimFrame = null;
+function drawChatHalftone() {
+    if (!chatHalftoneCtx || !chatHalftoneCanvas) return;
+    const ctx = chatHalftoneCtx;
+    const w = chatHalftoneCanvas.offsetWidth;
+    const h = chatHalftoneCanvas.offsetHeight;
+    if (w <= 0 || h <= 0) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const isLight = document.getElementById('main-content-wrapper')?.classList.contains('light-theme') || false;
+    const hue = currentHue || 200;
+    const isInferencing = document.getElementById('main-content-wrapper')?.classList.contains('inferencing') || false;
+
+    // Center of the input area (bottom-center of the bar)
+    const cx = w / 2;
+    const cy = h * 0.75; // slightly below center, near the input box
+    const maxDist = Math.max(w, h) * 0.7;
+
+    const spacing = 18;
+    const seed = 42; // deterministic seed for consistent shape assignment
+
+    for (let x = spacing / 2; x < w; x += spacing) {
+        for (let y = spacing / 2; y < h; y += spacing) {
+            const dx = x - cx, dy = y - cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > maxDist) continue;
+
+            // Density falloff: more shapes near center, fewer far away
+            const falloff = 1 - (dist / maxDist);
+            if (falloff < 0.1) continue;
+
+            // Skip some dots based on distance (sparser far away)
+            const skipThreshold = 1 - falloff * 0.8;
+            const hash = ((x * 7 + y * 13 + seed) % 100) / 100;
+            if (hash < skipThreshold * 0.5) continue;
+
+            // Size: larger near center
+            const baseSize = 1.2 + falloff * 2.5;
+
+            // Alpha: more opaque near center
+            const baseAlpha = falloff * (isInferencing ? 0.5 : 0.2);
+
+            // Shape: deterministic based on position
+            const shapeIdx = (x * 3 + y * 7 + seed) % SHAPES.length;
+            const shape = SHAPES[shapeIdx];
+
+            if (isInferencing) {
+                const sat = 70 + falloff * 20;
+                const light = 55 + falloff * 15;
+                ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${baseAlpha})`;
+            } else {
+                ctx.fillStyle = isLight
+                    ? `rgba(0, 0, 0, ${baseAlpha})`
+                    : `rgba(255, 255, 255, ${baseAlpha})`;
+            }
+
+            ctx.beginPath();
+            switch (shape) {
+                case 'circle':
+                    ctx.arc(x, y, baseSize, 0, 6.2832);
+                    break;
+                case 'square':
+                    ctx.rect(x - baseSize, y - baseSize, baseSize * 2, baseSize * 2);
+                    break;
+                case 'diamond':
+                    ctx.moveTo(x, y - baseSize * 1.3);
+                    ctx.lineTo(x + baseSize * 1.3, y);
+                    ctx.lineTo(x, y + baseSize * 1.3);
+                    ctx.lineTo(x - baseSize * 1.3, y);
+                    ctx.closePath();
+                    break;
+                case 'triangle':
+                    ctx.moveTo(x, y - baseSize * 1.2);
+                    ctx.lineTo(x + baseSize * 1.1, y + baseSize * 0.8);
+                    ctx.lineTo(x - baseSize * 1.1, y + baseSize * 0.8);
+                    ctx.closePath();
+                    break;
+            }
+            ctx.fill();
+        }
     }
+}
 
-    if (blobContainer) {
-        blobContainer.remove();
-        blobContainer = null;
+function stopChatHalftone() {
+    if (chatHalftoneAnimFrame) {
+        cancelAnimationFrame(chatHalftoneAnimFrame);
+        chatHalftoneAnimFrame = null;
     }
-
-    // Remove halftone overlay
-    const halftoneOverlay = document.querySelector('.chat-bottom-bar .halftone-overlay');
-    if (halftoneOverlay) halftoneOverlay.remove();
-
-    blobElements = [];
+    if (chatHalftoneCanvas) {
+        chatHalftoneCanvas.remove();
+        chatHalftoneCanvas = null;
+        chatHalftoneCtx = null;
+    }
 }
 
 // ==================== Chat: Model Status ====================
@@ -688,7 +696,7 @@ async function sendMessage(text) {
     const thinkTitle = thinkBlock.querySelector('.thinking-title');
     isGenerating = true;
     document.getElementById('main-content-wrapper').classList.add('inferencing');
-    createBlobs();
+    createChatHalftone();
     updateSendBtnState();
     const controller = new AbortController();
     currentAbortController = controller;
@@ -774,7 +782,7 @@ async function sendMessage(text) {
         isGenerating = false;
         currentAbortController = null;
         document.getElementById('main-content-wrapper').classList.remove('inferencing');
-        stopBlobs();
+        stopChatHalftone();
         updateSendBtnState();
     }
 }

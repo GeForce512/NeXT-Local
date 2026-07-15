@@ -86,9 +86,11 @@
                                     </div>
                                 </div>
                                 <div class="smart-input-area">
-                                    <input type="text" id="chat-input" class="chat-input" data-i18n-placeholder="chat.input_placeholder" placeholder="输入消息..." disabled />
+                                    <div class="input-wrapper">
+                                        <input type="text" id="chat-input" class="chat-input" data-i18n-placeholder="chat.input_placeholder" placeholder="输入消息..." disabled />
+                                        <button id="chat-stop-btn" class="btn stop-btn" style="display:none;" data-i18n="chat.stop">停止</button>
+                                    </div>
                                     <button id="chat-send-btn" class="btn chat-send-btn" disabled data-i18n="chat.send">发送</button>
-                                    <button id="chat-stop-btn" class="btn stop-btn" style="display:none;" data-i18n="chat.stop">停止</button>
                                 </div>
                             </div>
                         </main>
